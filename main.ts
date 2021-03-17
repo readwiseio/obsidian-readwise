@@ -1,42 +1,56 @@
-import { App, Modal, Notice, Plugin, PluginSettingTab, Setting } from 'obsidian';
+import { schedulingPolicy } from 'cluster';
+import { timeStamp } from 'node:console';
+import { App, Modal, Notice, Plugin, Vault, PluginSettingTab, Setting, DataAdapter, ButtonComponent } from 'obsidian';
+
+require('electron');
+
+interface sampleDataFormat extends JSON {
+	content: string;
+	fileName: string
+}
 
 interface MyPluginSettings {
-	mySetting: string;
+	token: string;
+	sampleDataURL: string;
 }
 
 const DEFAULT_SETTINGS: MyPluginSettings = {
-	mySetting: 'default'
+	token: 'default',
+	sampleDataURL: 'https://gist.github.com/jborichevskiy/c650c7cf4cc489a4925dddab485e5bd9/raw/341e666d97429e60521e3d2c9831a6d8053b1f23/data.json'
 }
+
 
 export default class MyPlugin extends Plugin {
 	settings: MyPluginSettings;
+	fs: DataAdapter;
+	vault: Vault;
+
+	async fetchContent(url: string): Promise<sampleDataFormat> {
+		const response = await fetch(url);
+		return response.json();
+	}
+
+	async writeFile(data: sampleDataFormat): Promise<void> {
+		let fileExists = await this.fs.exists(data.fileName);
+		if (fileExists) {
+			console.log('file already exists!');
+		} else {
+			console.log('does not exist');
+			await this.fs.write(data.fileName, data.content);
+		}
+	}
 
 	async onload() {
-		console.log('loading plugin');
-
 		await this.loadSettings();
 
-		this.addRibbonIcon('dice', 'Sample Plugin', () => {
-			new Notice('This is a notice!');
-		});
-
-		this.addStatusBarItem().setText('Status Bar Text');
-
 		this.addCommand({
-			id: 'open-sample-modal',
-			name: 'Open Sample Modal',
-			// callback: () => {
-			// 	console.log('Simple Callback');
-			// },
-			checkCallback: (checking: boolean) => {
-				let leaf = this.app.workspace.activeLeaf;
-				if (leaf) {
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
-					return true;
-				}
-				return false;
+			id: 'init-sync',
+			name: 'Sync Readwise Highlights',
+			callback: () => {
+				this.vault = this.app.vault;
+				this.fs = this.vault.adapter;
+
+				this.fetchContent(this.settings.sampleDataURL).then((data) => this.writeFile(data))
 			}
 		});
 
@@ -59,26 +73,11 @@ export default class MyPlugin extends Plugin {
 
 	async loadSettings() {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		console.log('loaded settings', this.settings)
 	}
 
 	async saveSettings() {
 		await this.saveData(this.settings);
-	}
-}
-
-class SampleModal extends Modal {
-	constructor(app: App) {
-		super(app);
-	}
-
-	onOpen() {
-		let {contentEl} = this;
-		contentEl.setText('Woah!');
-	}
-
-	onClose() {
-		let {contentEl} = this;
-		contentEl.empty();
 	}
 }
 
@@ -91,21 +90,44 @@ class SampleSettingTab extends PluginSettingTab {
 	}
 
 	display(): void {
-		let {containerEl} = this;
+		let { containerEl } = this;
 
 		containerEl.empty();
 
-		containerEl.createEl('h2', {text: 'Settings for my awesome plugin.'});
+		containerEl.createEl('h2', { text: 'Readwise Sync' });
 
 		new Setting(containerEl)
-			.setName('Setting #1')
-			.setDesc('It\'s a secret')
+			.setName("Connect to Readwise")
+			.setDesc("Find your access token.")
+			.addButton((button) => {
+				button.setButtonText("Open Readwise.io")
+					.onClick(() => {
+						window.open("https://readwise.io/access_token");
+					})
+			})
+
+
+		let descriptionText;
+		if (this.plugin.settings.token) {
+			descriptionText = "Token saved."
+		} else {
+			descriptionText = "No token set."
+		}
+
+		new Setting(containerEl)
+			.setName('Access Token')
+			.setDesc(descriptionText)
+			.setClass('tokenSetting')
 			.addText(text => text
-				.setPlaceholder('Enter your secret')
-				.setValue('')
+				.setPlaceholder('Enter your access token here')
+				.setValue(this.plugin.settings.token)
 				.onChange(async (value) => {
 					console.log('Secret: ' + value);
-					this.plugin.settings.mySetting = value;
+					this.plugin.settings.token = value;
+
+					// TODO: cleaner way of doing this
+					containerEl.querySelector('.tokenSetting').querySelector('.setting-item-description').innerText = "Token saved!"
+
 					await this.plugin.saveSettings();
 				}));
 	}
