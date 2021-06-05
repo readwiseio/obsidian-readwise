@@ -11,6 +11,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@zip.js/zip.js": "^2.2.33",
     "open": "^7.3.1"
   },
   "devDependencies": {
