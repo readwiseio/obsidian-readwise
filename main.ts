@@ -1,6 +1,7 @@
 import { App, Modal, Notice, Plugin, Vault, PluginSettingTab, Setting, DataAdapter, ButtonComponent, DropdownComponent } from 'obsidian';
 import * as zip from "@zip.js/zip.js";
 
+
 require('electron');
 var fs = require("fs");
 
@@ -186,8 +187,10 @@ class SampleSettingTab extends PluginSettingTab {
 						// TODO: generate a real UUID
 						let uuid = 'helloworld123123'
 
+						// TODO: this is the existing endpoint that ibooks uses, is userfacing
 						window.open(`${baseURL}/api_auth?token=${uuid}&service=obsidian`);
 
+						// TODO: this endpoint is used by the plugin, potentially should rename it to reduce confusion
 						this.plugin.fetchToken(`${baseURL}/api/auth?token=${uuid}`).then((
 							data: readwiseAuthResponse) => {
 							// update token in settings
@@ -206,7 +209,9 @@ class SampleSettingTab extends PluginSettingTab {
 			.addButton((button) => {
 				button.setButtonText('Run sync')
 					.onClick(() => {
-						if (this.plugin.settings.isSyncing) {
+						// TODO: disable this button until there is an access token
+						if (false) {
+						 	// TODO: This is used to prevent multiple syncs at the same time. However, if a previous sync fails, it can stop new syncs from happening. Make sure to set isSyncing to false if there's ever errors/failures in previous sync attempts, so that we don't block syncing subsequent times.
 							console.log('skipping sync init');
 						} else {
 							this.plugin.requestArchive(button);
