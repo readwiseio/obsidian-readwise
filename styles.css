@@ -1,0 +1,38 @@
+.setting-item {
+}
+
+.setting-item-info {
+}
+
+.setting-item-control {
+}
+
+
+.theme-light {
+    --hyper-highlight: #FFF2AC;
+}
+
+.theme-dark {
+    --hyper-highlight: green;
+}
+
+.syncInfo {
+    margin-right: 10px;
+}
+
+.rw-error {
+    color: #DB5461;
+}
+.rw-success {
+    color: #8AAA79;
+}
+
+
+img[alt=rw-book-cover] {
+    max-height: 200px;
+}
+
+.rw-hyper-highlight {
+    background-color: var(--hyper-highlight);
+}
+
