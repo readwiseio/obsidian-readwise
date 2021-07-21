@@ -10,21 +10,25 @@
 
 .theme-light {
     --hyper-highlight: #FFF2AC;
+    --error-color: #DB5461;
+    --success-color: #8AAA79
 }
 
 .theme-dark {
-    --hyper-highlight: green;
+    --hyper-highlight: #1C5998;
+    --error-color: #DB5461;
+    --success-color: #8AAA79
 }
 
-.syncInfo {
+.rw-info {
     margin-right: 10px;
 }
 
 .rw-error {
-    color: #DB5461;
+    color: var(--error-color);
 }
 .rw-success {
-    color: #8AAA79;
+    color: var(--success-color);
 }
 
 

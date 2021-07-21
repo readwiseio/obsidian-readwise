@@ -55,7 +55,7 @@ export default class ReadwisePlugin extends Plugin {
     this.settings.lastSyncFailed = true;
     this.saveData(this.settings);
     if (buttonContext) {
-      this.showSyncStatus(buttonContext.buttonEl.parentElement, msg, "rw-error")
+      this.showInfoStatus(buttonContext.buttonEl.parentElement, msg, "rw-error")
       buttonContext.buttonEl.setText("Run sync");
     }
   }
@@ -70,7 +70,7 @@ export default class ReadwisePlugin extends Plugin {
     // if we have a button context, update the text on it
     // this is the case if we fired on a "Run sync" click (the button)
     if (buttonContext) {
-      this.showSyncStatus(buttonContext.buttonEl.parentNode.parentElement, msg, "rw-success")
+      this.showInfoStatus(buttonContext.buttonEl.parentNode.parentElement, msg, "rw-success")
       buttonContext.buttonEl.setText("Run sync");
     }
   }
@@ -87,13 +87,13 @@ export default class ReadwisePlugin extends Plugin {
       )
     } catch (e) {
       // network failed
-      console.log("ReadwisePlugin: Fetch Request failed: ", e)
+      console.log("ReadwisePlugin: fetch failed in getProfileInfo: ", e)
     }
 
     if (response && response.ok) {
       return await response.json();
     } else {
-      console.log("ReadwisePlugin: Response failed: ", response)
+      console.log("ReadwisePlugin: bad response in getProfileInfo: ", response)
       return {}
     }
   }
@@ -107,18 +107,20 @@ export default class ReadwisePlugin extends Plugin {
       url += `&statusID=${statusId}`
     }
     let response, data: ExportStatusFormat
-    response = await fetch(
-      url,
-      {
-        headers: this.getAuthHeaders()
-      }
-    ).catch((e) => {
-      console.log("Request failed: ", e)
-    });
+    try {
+      response = await fetch(
+        url,
+        {
+          headers: this.getAuthHeaders()
+        }
+      )
+    } catch (e) {
+      console.log("ReadwisePlugin: fetch failed in requestArchive: ", e)
+    }
     if (response && response.ok) {
       data = await response.json();
     } else {
-      console.log("Response failed: ", response)
+      console.log("ReadwisePlugin: bad response in requestArchive: ", response)
       this.handleSyncError(buttonContext, response ? response.statusText : "Can't connect to server")
       return
     }
@@ -130,22 +132,21 @@ export default class ReadwisePlugin extends Plugin {
       await this.requestArchive(buttonContext, data.latest_id);
 
     } else if (SUCCESS_STATUSES.includes(data.status)) {
-
-      this.downloadArchive(data.latest_id, buttonContext);
+      return this.downloadArchive(data.latest_id, buttonContext);
 
     } else {
       this.handleSyncError(buttonContext, "Sync failed")
     }
   }
 
-  showSyncStatus(container: HTMLElement, msg: string, className = "") {
-    let info = container.find('.syncInfo')
+  showInfoStatus(container: HTMLElement, msg: string, className = "") {
+    let info = container.find('.rw-info')
     info.setText(msg)
     info.addClass(className)
   }
 
-  clearSyncStatus(container: HTMLElement) {
-    let info = container.find('.syncInfo')
+  clearInfoStatus(container: HTMLElement) {
+    let info = container.find('.rw-info')
     info.innerHTML = "";
   }
 
@@ -164,15 +165,17 @@ export default class ReadwisePlugin extends Plugin {
     }
 
     let response, blob
-    response = await fetch(
-      artifactURL, {headers: this.getAuthHeaders()}
-    ).catch((e) => {
-      console.log("Request failed: ", e)
-    });
+    try {
+      response = await fetch(
+        artifactURL, {headers: this.getAuthHeaders()}
+      )
+    } catch (e) {
+      console.log("ReadwisePlugin: fetch failed in downloadArchive: ", e)
+    }
     if (response && response.ok) {
       blob = await response.blob();
     } else {
-      console.log("Response failed: ", response)
+      console.log("ReadwisePlugin: bad response in downloadArchive: ", response)
       this.handleSyncError(buttonContext, response ? response.statusText : "Can't connect to server")
       return
     }
@@ -220,10 +223,8 @@ export default class ReadwisePlugin extends Plugin {
 
   async configureSchedule() {
     const minutes = parseInt(this.settings.frequency)
-
     let milliseconds = minutes * 60 * 1000; // minutes * seconds * milliseconds
-    console.log('setting interval to ', milliseconds, 'milliseconds');
-
+    console.log('ReadwisePlugin: setting interval to ', milliseconds, 'milliseconds');
     window.clearInterval();
     if (!milliseconds) {
       // we got manual option
@@ -239,20 +240,22 @@ export default class ReadwisePlugin extends Plugin {
     let formData = new FormData();
     formData.append('userBookId', bookId);
     formData.append('exportTarget', 'obsidian');
-    response = await fetch(
-      `${baseURL}/api/refresh_book_export`,
-      {
-        headers: this.getAuthHeaders(),
-        method: "POST",
-        body: formData
-      }
-    ).catch((e) => {
-      console.log("Request failed: ", e)
-    });
+    try {
+      response = await fetch(
+        `${baseURL}/api/refresh_book_export`,
+        {
+          headers: this.getAuthHeaders(),
+          method: "POST",
+          body: formData
+        }
+      )
+    } catch (e) {
+      console.log("ReadwisePlugin: fetch failed in refreshBookExport: ", e)
+    }
     if (response && response.ok) {
       return
     } else {
-      console.log("Response failed: ", response)
+      console.log("ReadwisePlugin: bad response in refreshBookExport: ", response)
       // this.settings.booksToRefresh.push(bookId)
       // this.saveSettings()
       return
@@ -316,7 +319,8 @@ export default class ReadwisePlugin extends Plugin {
   }
 
   onunload() {
-    console.log('unloading plugin');
+    console.log('ReadwisePlugin: unloading');
+    // should we do something more here?
   }
 
   async loadSettings() {
@@ -336,20 +340,21 @@ export default class ReadwisePlugin extends Plugin {
     }
 
     let response, data: ReadwiseAuthResponse
-    response = await fetch(
-      `${baseURL}/api/auth?token=${uuid}`
-    ).catch((e) => {
-      console.log("Request failed: ", e)
-    });
+    try {
+      response = await fetch(
+        `${baseURL}/api/auth?token=${uuid}`
+      )
+    } catch (e) {
+      console.log("ReadwisePlugin: fetch failed in getUserAuthToken: ", e)
+    }
     if (response && response.ok) {
       data = await response.json();
     } else {
-      console.log("Response failed: ", response)
+      console.log("ReadwisePlugin: bad response in getUserAuthToken: ", response)
       // TODO: handle token error
-      // this.handleSyncError(buttonContext, response ? response.statusText : "Can't connect to server")
+      this.showInfoStatus(button.parentElement, "Authorization failed. Try again", "rw-error")
       return
     }
-    console.log("Got Token! Data:", data)
     if (!this.settings.obsidianToken) {
       this.settings.obsidianToken = uuid
       await this.saveSettings()
@@ -358,21 +363,18 @@ export default class ReadwisePlugin extends Plugin {
       this.settings.token = data.userAccessToken;
     } else {
       if (attempt > 20) {
-        console.log(`TOO MANY ATTEMPTS`)
+        console.log('ReadwisePlugin: reached attempt limit in getUserAuthToken')
         return
       }
-      console.log(`didn't get token data, retrying (attempt no ${attempt + 1})`)
+      console.log(`ReadwisePlugin: didn't get token data, retrying (attempt ${attempt + 1})`)
       await new Promise(resolve => setTimeout(resolve, 1000));
       await this.getUserAuthToken(button, attempt + 1)
     }
     this.saveSettings()
 
-    // update the value of the token element for the user
-    // const input = button.nextElementSibling as HTMLInputElement
-    // input.value = data.userAccessToken;
-
     // change our button text
     button.setText("Reconnect");
+    return true
   }
 }
 
@@ -394,7 +396,7 @@ class ReadwiseSettingTab extends PluginSettingTab {
     if (this.plugin.settings.token) {
       new Setting(containerEl)
         .setName("Sync data")
-        .setClass('syncSetting')
+        .setClass('rw-setting-sync')
         .addButton((button) => {
           button.setButtonText('Run sync')
             .onClick(() => {
@@ -405,7 +407,7 @@ class ReadwiseSettingTab extends PluginSettingTab {
                 //  we don't block syncing subsequent times.
                 console.log('skipping sync init');
               } else {
-                this.plugin.clearSyncStatus(containerEl)
+                this.plugin.clearInfoStatus(containerEl)
                 this.plugin.settings.isSyncing = true;
                 this.plugin.saveData(this.plugin.settings);
                 this.plugin.requestArchive(button);
@@ -414,8 +416,8 @@ class ReadwiseSettingTab extends PluginSettingTab {
 
             })
         });
-      let el = containerEl.createEl("div", {cls: "syncInfo"})
-      containerEl.find(".syncSetting > .setting-item-control ").prepend(el)
+      let el = containerEl.createEl("div", {cls: "rw-info"})
+      containerEl.find(".rw-setting-sync > .setting-item-control ").prepend(el)
 
       // let descriptionText = this.plugin.settings.token != "" ? "Token saved." : "No token set.";
       new Setting(containerEl)
@@ -466,36 +468,25 @@ class ReadwiseSettingTab extends PluginSettingTab {
         });
 
       if (this.plugin.settings.lastSyncFailed) {
-        // debugger;
-        this.plugin.showSyncStatus(containerEl.find(".syncInfo").parentElement, "Last sync failed", "rw-error")
+        this.plugin.showInfoStatus(containerEl.find(".rw-setting-sync .rw-info").parentElement, "Last sync failed", "rw-error")
       }
     }
     new Setting(containerEl)
       .setName("Connect to Readwise")
+      .setClass("rw-setting-connect")
       .addButton((button) => {
         let text = this.plugin.settings.token ? "Reconnect" : "CONNECT";
         button.setButtonText(
           text
         ).onClick(async (evt) => {
-          await this.plugin.getUserAuthToken(evt.target as HTMLElement)
-          this.display()
+          const success = await this.plugin.getUserAuthToken(evt.target as HTMLElement)
+          if (success) {
+            this.display()
+          }
         })
       })
-    // .addText(text => text
-    //   .setPlaceholder('Enter your access token here')
-    //   .setValue(this.plugin.settings.token)
-    //   .onChange(async (value) => {
-    //     console.log('Secret: ' + value);
-    //     this.plugin.settings.token = value;
-    //
-    //     // TODO: cleaner way of doing this
-    //     // containerEl.querySelector('.tokenSetting').querySelector('.setting-item-description').setVal = "Token saved!"
-    //     await this.plugin.saveSettings();
-    //   }))
-    // .addExtraButton(button => {
-    //   button.setIcon("dot-network")
-    // });
-
+    let el = containerEl.createEl("div", {cls: "rw-info"})
+    containerEl.find(".rw-setting-connect > .setting-item-control ").prepend(el)
 
   }
 }
