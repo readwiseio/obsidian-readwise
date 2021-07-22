@@ -3,7 +3,7 @@
 	"name": "Readwise Sync",
 	"version": "0.1.0",
 	"minAppVersion": "0.12.10",
-	"description": "Automatically pulls your Readwise highlights to Obsidian.",
+	"description": "Official Readwise <-> Obsidian integration",
 	"author": "Readwise",
 	"authorUrl": "https://readwise.io",
 	"isDesktopOnly": false

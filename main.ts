@@ -1,4 +1,15 @@
-import {App, ButtonComponent, DataAdapter, Plugin, PluginSettingTab, setIcon, Setting, Vault} from 'obsidian';
+import {
+  App,
+  ButtonComponent,
+  DataAdapter,
+  Modal,
+  Notice,
+  Plugin,
+  PluginSettingTab,
+  setIcon,
+  Setting,
+  Vault
+} from 'obsidian';
 import * as zip from "@zip.js/zip.js";
 
 
@@ -13,9 +24,16 @@ interface ReadwiseAuthResponse extends JSON {
   userAccessToken: string;
 }
 
-interface ExportStatusFormat {
+interface ExportRequestResponse {
   latest_id: number,
   status: string
+}
+
+interface ExportStatusResponse {
+  totalBooks: number,
+  booksExported: number,
+  isFinished: boolean,
+  taskStatus: string,
 }
 
 interface ReadwisePluginSettings {
@@ -23,9 +41,9 @@ interface ReadwisePluginSettings {
   obsidianToken: string;
   isSyncing: boolean;
   frequency: string;
+  triggerOnLoad: boolean;
   lastSyncFailed: boolean;
   lastSavedStatusID: number;
-  product: string;
   refreshBooks: boolean,
   booksToRefresh: Array<string>;
   booksIDsMap: { [key: string]: string; };
@@ -36,10 +54,10 @@ const DEFAULT_SETTINGS: ReadwisePluginSettings = {
   token: "",
   obsidianToken: "",
   frequency: "0", // manual by default
+  triggerOnLoad: false,
   isSyncing: false,
   lastSyncFailed: false,
   lastSavedStatusID: 0,
-  product: "trial",
   refreshBooks: true,
   booksToRefresh: [],
   booksIDsMap: {}
@@ -75,9 +93,9 @@ export default class ReadwisePlugin extends Plugin {
     }
   }
 
-  async getProfileInfo() {
-    let url = `${baseURL}/api/profile/`
-    let response
+  async getExportStatus(statusId: number, buttonContext?: ButtonComponent) {
+    let url = `${baseURL}/api/get_export_status?exportStatusId=${statusId}`
+    let response, data: ExportStatusResponse
     try {
       response = await fetch(
         url,
@@ -86,15 +104,29 @@ export default class ReadwisePlugin extends Plugin {
         }
       )
     } catch (e) {
-      // network failed
-      console.log("ReadwisePlugin: fetch failed in getProfileInfo: ", e)
+      console.log("ReadwisePlugin: fetch failed in getExportStatus: ", e)
     }
-
     if (response && response.ok) {
-      return await response.json();
+      data = await response.json();
     } else {
-      console.log("ReadwisePlugin: bad response in getProfileInfo: ", response)
-      return {}
+      console.log("ReadwisePlugin: bad response in requestArchive: ", response)
+      this.handleSyncError(buttonContext, response ? response.statusText : "Can't connect to server")
+      return
+    }
+    const WAITING_STATUSES = ['PENDING', 'RECEIVED', 'STARTED', 'RETRY']
+    const SUCCESS_STATUSES = ['SUCCESS']
+    if (WAITING_STATUSES.includes(data.taskStatus)) {
+      if (data.booksExported) {
+        const progressMsg = `Exporting Readwise data (${data.booksExported} / ${data.totalBooks}) ...`
+        new Notice(progressMsg);
+      }
+      // re-try in 1 second
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      await this.getExportStatus(statusId, buttonContext);
+    } else if (SUCCESS_STATUSES.includes(data.taskStatus)) {
+      return this.downloadArchive(statusId, buttonContext);
+    } else {
+      this.handleSyncError(buttonContext, "Sync failed")
     }
   }
 
@@ -106,7 +138,7 @@ export default class ReadwisePlugin extends Plugin {
     if (statusId) {
       url += `&statusID=${statusId}`
     }
-    let response, data: ExportStatusFormat
+    let response, data: ExportRequestResponse
     try {
       response = await fetch(
         url,
@@ -119,23 +151,17 @@ export default class ReadwisePlugin extends Plugin {
     }
     if (response && response.ok) {
       data = await response.json();
+      if (data.latest_id <= this.settings.lastSavedStatusID) {
+        this.handleSyncSuccess(buttonContext)
+        new Notice("Readwise data is already up to date");
+        return
+      }
+      new Notice("Readwise sync started");
+      return this.getExportStatus(data.latest_id, buttonContext)
     } else {
       console.log("ReadwisePlugin: bad response in requestArchive: ", response)
       this.handleSyncError(buttonContext, response ? response.statusText : "Can't connect to server")
       return
-    }
-    const WAITING_STATUSES = ['PENDING', 'RECEIVED', 'STARTED', 'RETRY']
-    const SUCCESS_STATUSES = ['SUCCESS']
-    if (WAITING_STATUSES.includes(data.status)) {
-      // re-try in 1 second
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      await this.requestArchive(buttonContext, data.latest_id);
-
-    } else if (SUCCESS_STATUSES.includes(data.status)) {
-      return this.downloadArchive(data.latest_id, buttonContext);
-
-    } else {
-      this.handleSyncError(buttonContext, "Sync failed")
     }
   }
 
@@ -161,6 +187,7 @@ export default class ReadwisePlugin extends Plugin {
     if (exportID <= this.settings.lastSavedStatusID) {
       console.log(`Already saved data from export ${exportID}`)
       this.handleSyncSuccess(buttonContext)
+      new Notice("Readwise data is already up to date");
       return
     }
 
@@ -185,39 +212,50 @@ export default class ReadwisePlugin extends Plugin {
     const blobReader = new zip.BlobReader(blob);
     const zipReader = new zip.ZipReader(blobReader);
     const entries = await zipReader.getEntries();
-
     if (entries.length) {
       for (const entry of entries) {
-        // ensure the directory exists
-        let dirPath = path.dirname(entry.filename)
-        const exists = await this.fs.exists(dirPath)
-        if (!exists) {
-          await this.fs.mkdir(dirPath);
-        }
-        // write the actual files
-        const contents = await entry.getData(new zip.TextWriter())
-        let contentToSave = contents
-        let originalName = entry.filename
+        let bookID: string
+        try {
+          // ensure the directory exists
+          let dirPath = path.dirname(entry.filename)
+          const exists = await this.fs.exists(dirPath)
+          if (!exists) {
+            await this.fs.mkdir(dirPath);
+          }
+          // write the actual files
+          const contents = await entry.getData(new zip.TextWriter())
+          let contentToSave = contents
+          let originalName = entry.filename
 
-        // extracting book ID from file name
-        let split = entry.filename.split("--")
-        if (split.length > 1) {
-          originalName = split.slice(0, -1).join("--") + ".md"
-          this.settings.booksIDsMap[originalName] = split.last().match(/\d+/g)[0];
-        }
+          // extracting book ID from file name
+          let split = entry.filename.split("--")
+          if (split.length > 1) {
+            originalName = split.slice(0, -1).join("--") + ".md"
+            bookID = split.last().match(/\d+/g)[0]
+            this.settings.booksIDsMap[originalName] = bookID;
+          }
 
-        if (await this.fs.exists(originalName)) {
-          // if the file already exists we need to append content to existing one
-          const existingContent = await this.fs.read(originalName)
-          contentToSave = existingContent + contents
+          if (await this.fs.exists(originalName)) {
+            // if the file already exists we need to append content to existing one
+            const existingContent = await this.fs.read(originalName)
+            contentToSave = existingContent + contents
+          }
+          await this.fs.write(originalName, contentToSave)
+          await this.saveSettings()
+        } catch (e) {
+          console.log(`ReadwisePlugin: error writing ${entry.filename}:`,e)
+          if (bookID) {
+            this.settings.booksToRefresh.push(bookID)
+            await this.saveSettings()
+          }
+          // communicate with readwise?
         }
-        await this.fs.write(originalName, contentToSave)
-        await this.saveSettings()
       }
     }
     // close the ZipReader
     await zipReader.close();
     this.handleSyncSuccess(buttonContext, "Synced!", exportID)
+    new Notice("Readwise sync completed");
   }
 
 
@@ -255,22 +293,23 @@ export default class ReadwisePlugin extends Plugin {
     if (response && response.ok) {
       return
     } else {
-      console.log("ReadwisePlugin: bad response in refreshBookExport: ", response)
-      // this.settings.booksToRefresh.push(bookId)
-      // this.saveSettings()
+      console.log(`ReadwisePlugin: saving book id ${bookId} to refresh later`)
+      let booksToRefresh = this.settings.booksToRefresh
+      booksToRefresh.push(bookId)
+      this.settings.booksToRefresh = booksToRefresh
+      await this.saveSettings()
       return
     }
   }
 
   async onload() {
     await this.loadSettings();
-    if (this.settings.token) {
-      const profileInfo = await this.getProfileInfo()
-      if (profileInfo) {
-        this.settings.product = profileInfo.product
-        await this.saveSettings()
-      }
-    }
+    let booksToRefresh = this.settings.booksToRefresh
+    this.settings.booksToRefresh = []
+    await this.saveSettings()
+    booksToRefresh.forEach((bookID) => {
+      this.refreshBookExport(bookID)
+    })
     this.addSettingTab(new ReadwiseSettingTab(this.app, this));
     this.configureSchedule();
     this.app.vault.on("delete", (file) => {
@@ -295,6 +334,7 @@ export default class ReadwisePlugin extends Plugin {
       callback: () => {
         if (this.settings.isSyncing) {
           console.log('skipping Readwise sync: already in progress');
+          new Notice("Readwise sync already in progress");
         } else {
           this.settings.isSyncing = true;
           this.saveSettings();
@@ -316,6 +356,9 @@ export default class ReadwisePlugin extends Plugin {
         strongEl.replaceWith(replacement)
       })
     })
+    if (this.settings.triggerOnLoad) {
+      this.requestArchive()
+    }
   }
 
   onunload() {
@@ -334,7 +377,6 @@ export default class ReadwisePlugin extends Plugin {
   async getUserAuthToken(button: HTMLElement, attempt = 0) {
     let uuid = this.settings.obsidianToken || Math.random().toString(36).substring(2, 15)
 
-    // TODO: this is the existing endpoint that ibooks uses, is userfacing
     if (attempt === 0) {
       window.open(`${baseURL}/api_auth?token=${uuid}&service=obsidian`);
     }
@@ -406,6 +448,7 @@ class ReadwiseSettingTab extends PluginSettingTab {
                 //  if there's ever errors/failures in previous sync attempts, so that
                 //  we don't block syncing subsequent times.
                 console.log('skipping sync init');
+                new Notice("Readwise sync already in progress");
               } else {
                 this.plugin.clearInfoStatus(containerEl)
                 this.plugin.settings.isSyncing = true;
@@ -444,13 +487,10 @@ class ReadwiseSettingTab extends PluginSettingTab {
         .setName('Sync Frequency')
         .setDesc("how often to check for new highlights")
         .addDropdown(dropdown => {
-          if (this.plugin.settings.product === "full") {
-            // dropdown.addOption("30", "30 mins");
-            dropdown.addOption("60", "1 hour");
-          }
+          dropdown.addOption("0", "manual");
+          dropdown.addOption("60", "1 hour");
           dropdown.addOption((12 * 60).toString(), "12 hours");
           dropdown.addOption((24 * 60).toString(), "daily");
-          dropdown.addOption("0", "manual");
 
           // select the currently-saved option
           dropdown.setValue(this.plugin.settings.frequency);
@@ -466,6 +506,16 @@ class ReadwiseSettingTab extends PluginSettingTab {
             this.plugin.configureSchedule();
           })
         });
+      new Setting(containerEl)
+        .setName("Trigger a sync on app load")
+        .addToggle((toggle) => {
+            toggle.setValue(this.plugin.settings.triggerOnLoad)
+            toggle.onChange((val) => {
+              this.plugin.settings.triggerOnLoad = val;
+              this.plugin.saveSettings()
+            })
+          }
+        )
 
       if (this.plugin.settings.lastSyncFailed) {
         this.plugin.showInfoStatus(containerEl.find(".rw-setting-sync .rw-info").parentElement, "Last sync failed", "rw-error")
