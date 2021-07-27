@@ -212,6 +212,7 @@ export default class ReadwisePlugin extends Plugin {
     const blobReader = new zip.BlobReader(blob);
     const zipReader = new zip.ZipReader(blobReader);
     const entries = await zipReader.getEntries();
+    new Notice("Saving files...");
     if (entries.length) {
       for (const entry of entries) {
         let bookID: string
@@ -310,8 +311,6 @@ export default class ReadwisePlugin extends Plugin {
     booksToRefresh.forEach((bookID) => {
       this.refreshBookExport(bookID)
     })
-    this.addSettingTab(new ReadwiseSettingTab(this.app, this));
-    this.configureSchedule();
     this.app.vault.on("delete", (file) => {
       const bookId = this.settings.booksIDsMap[file.path]
       if (this.settings.refreshBooks && bookId) {
@@ -341,6 +340,7 @@ export default class ReadwisePlugin extends Plugin {
           this.requestArchive();
         }
       }
+
     });
     this.registerMarkdownPostProcessor((el, ctx) => {
       if (!ctx.sourcePath.startsWith("Readwise")) {
@@ -356,6 +356,8 @@ export default class ReadwisePlugin extends Plugin {
         strongEl.replaceWith(replacement)
       })
     })
+    this.addSettingTab(new ReadwiseSettingTab(this.app, this));
+    this.configureSchedule();
     if (this.settings.triggerOnLoad) {
       this.requestArchive()
     }
