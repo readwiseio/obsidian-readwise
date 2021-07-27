@@ -1,7 +1,7 @@
 {
-  "name": "obsidian-readwise",
+  "name": "readwise-official",
   "version": "1.0.1",
-  "description": "Automatically syncs your Readwise highlights into Obsidian.",
+  "description": "Automatically syncs your Readwise highlights with Obsidian.",
   "main": "main.js",
   "scripts": {
     "dev": "rollup --config rollup.config.js -w",
