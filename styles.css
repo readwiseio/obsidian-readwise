@@ -1,27 +1,25 @@
-.setting-item {
-}
-
-.setting-item-info {
-}
-
-.setting-item-control {
-}
-
 
 .theme-light {
-    --hyper-highlight: #FFF2AC;
+    --hyper-highlight: var(--text-highlight-bg, #FFF2AC);
     --error-color: #DB5461;
-    --success-color: #8AAA79
+    --success-color: #8AAA79;
+    --info-color: var(--text-muted, #000);
 }
 
 .theme-dark {
-    --hyper-highlight: #1C5998;
+    --hyper-highlight: var(--text-highlight-bg, #1C5998);
     --error-color: #DB5461;
-    --success-color: #8AAA79
+    --success-color: #8AAA79;
+    --info-color: var(--text-muted, #fff);
+}
+
+.rw-info-container {
+    margin-right: 10px;
 }
 
 .rw-info {
-    margin-right: 10px;
+    color: var(--info-color);
+    font-size: smaller;
 }
 
 .rw-error {

@@ -5,10 +5,14 @@
   "main": "main.js",
   "scripts": {
     "dev": "rollup --config rollup.config.js -w",
-    "build": "rollup --config rollup.config.js"
+    "build": "rollup --config rollup.config.js --environment READWISE_SERVER_URL:https://readwise.io",
+    "dist": "npm run build && mkdir -p dist/obsidian-readwise && cp styles.css main.js versions.json manifest.json dist/obsidian-readwise"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "obsidian",
+    "readwise"
+  ],
+  "author": "Readwise",
   "license": "MIT",
   "dependencies": {
     "@zip.js/zip.js": "^2.2.33",
@@ -20,9 +24,9 @@
     "@rollup/plugin-typescript": "^6.0.0",
     "@types/node": "^14.14.2",
     "dotenv": "^10.0.0",
+    "rollup-plugin-dotenv": "^0.3.0",
     "obsidian": "https://github.com/obsidianmd/obsidian-api/tarball/master",
     "rollup": "^2.32.1",
-    "rollup-plugin-dotenv": "^0.3.0",
     "tslib": "^2.0.3",
     "typescript": "^4.0.3"
   }
