@@ -1,5 +1,6 @@
 import {App, ButtonComponent, DataAdapter, debounce, Notice, Plugin, PluginSettingTab, Setting, Vault} from 'obsidian';
 import * as zip from "@zip.js/zip.js";
+import {asyncWalk} from "estree-walker";
 
 
 require('electron');
@@ -30,6 +31,7 @@ interface ReadwisePluginSettings {
   obsidianToken: string;
   readwiseDir: string;
   isSyncing: boolean;
+  silentRun: boolean;
   frequency: string;
   triggerOnLoad: boolean;
   lastSyncFailed: boolean;
@@ -46,7 +48,8 @@ const DEFAULT_SETTINGS: ReadwisePluginSettings = {
   obsidianToken: "",
   readwiseDir: "Readwise",
   frequency: "0", // manual by default
-  triggerOnLoad: false,
+  triggerOnLoad: true,
+  silentRun: false,
   isSyncing: false,
   lastSyncFailed: false,
   lastSavedStatusID: 0,
@@ -62,25 +65,31 @@ export default class ReadwisePlugin extends Plugin {
   vault: Vault;
 
   handleSyncError(buttonContext: ButtonComponent, msg: string) {
-    this.settings.isSyncing = false;
+    this.clearSettingsAfterRun()
     this.settings.lastSyncFailed = true;
-    this.settings.currentSyncStatusID = 0;
-    this.saveData(this.settings);
+    this.saveSettings();
     if (buttonContext) {
       this.showInfoStatus(buttonContext.buttonEl.parentElement, msg, "rw-error")
       buttonContext.buttonEl.setText("Run sync");
     } else {
-      new Notice(msg)
+      this.notice(msg, true)
     }
   }
 
-  handleSyncSuccess(buttonContext: ButtonComponent, msg: string = "Synced", exportID: number = null) {
+  clearSettingsAfterRun() {
     this.settings.isSyncing = false;
+    this.settings.silentRun = false;
+    this.settings.currentSyncStatusID = 0;
+  }
+
+  handleSyncSuccess(buttonContext: ButtonComponent, msg: string = "Synced", exportID: number = null) {
+    this.clearSettingsAfterRun()
     this.settings.lastSyncFailed = false;
+    this.settings.currentSyncStatusID = 0;
     if (exportID) {
       this.settings.lastSavedStatusID = exportID;
     }
-    this.saveData(this.settings);
+    this.saveSettings();
     // if we have a button context, update the text on it
     // this is the case if we fired on a "Run sync" click (the button)
     if (buttonContext) {
@@ -107,7 +116,7 @@ export default class ReadwisePlugin extends Plugin {
       data = await response.json();
     } else {
       console.log("ReadwisePlugin: bad response in requestArchive: ", response)
-      this.handleSyncError(buttonContext, response ? response.statusText : "Can't connect to server")
+      this.handleSyncError(buttonContext, `Readwise: ${response ? response.statusText : "Can't connect to server"}`)
       return
     }
     const WAITING_STATUSES = ['PENDING', 'RECEIVED', 'STARTED', 'RETRY']
@@ -115,9 +124,9 @@ export default class ReadwisePlugin extends Plugin {
     if (WAITING_STATUSES.includes(data.taskStatus)) {
       if (data.booksExported) {
         const progressMsg = `Exporting Readwise data (${data.booksExported} / ${data.totalBooks}) ...`
-        new Notice(progressMsg);
+        this.notice(progressMsg);
       } else {
-        new Notice("Building export...");
+        this.notice("Building export...");
       }
 
       // re-try in 1 second
@@ -153,17 +162,23 @@ export default class ReadwisePlugin extends Plugin {
       data = await response.json();
       if (data.latest_id <= this.settings.lastSavedStatusID) {
         this.handleSyncSuccess(buttonContext)
-        new Notice("Readwise data is already up to date");
+        this.notice("Readwise data is already up to date");
         return
       }
       this.settings.currentSyncStatusID = data.latest_id
       await this.saveSettings()
-      new Notice("Syncing Readwise data");
+      this.notice("Syncing Readwise data");
       return this.getExportStatus(data.latest_id, buttonContext)
     } else {
       console.log("ReadwisePlugin: bad response in requestArchive: ", response)
-      this.handleSyncError(buttonContext, response ? response.statusText : "Can't connect to server")
+      this.handleSyncError(buttonContext, `Readwise: ${response ? response.statusText : "Can't connect to server"}`)
       return
+    }
+  }
+
+  notice(msg: string, force = false) {
+    if (force || !this.settings.silentRun){
+      new Notice(msg);
     }
   }
 
@@ -189,7 +204,7 @@ export default class ReadwisePlugin extends Plugin {
     if (exportID <= this.settings.lastSavedStatusID) {
       console.log(`Already saved data from export ${exportID}`)
       this.handleSyncSuccess(buttonContext)
-      new Notice("Readwise data is already up to date");
+      this.notice("Readwise data is already up to date");
       return
     }
 
@@ -205,7 +220,7 @@ export default class ReadwisePlugin extends Plugin {
       blob = await response.blob();
     } else {
       console.log("ReadwisePlugin: bad response in downloadArchive: ", response)
-      this.handleSyncError(buttonContext, response ? response.statusText : "Can't connect to server")
+      this.handleSyncError(buttonContext, `Readwise: ${response ? response.statusText : "Can't connect to server"}`)
       return
     }
 
@@ -214,7 +229,7 @@ export default class ReadwisePlugin extends Plugin {
     const blobReader = new zip.BlobReader(blob);
     const zipReader = new zip.ZipReader(blobReader);
     const entries = await zipReader.getEntries();
-    new Notice("Saving files...");
+    this.notice("Saving files...");
     if (entries.length) {
       for (const entry of entries) {
         let bookID: string
@@ -248,7 +263,7 @@ export default class ReadwisePlugin extends Plugin {
           await this.saveSettings()
         } catch (e) {
           console.log(`ReadwisePlugin: error writing ${processedFileName}:`, e)
-          new Notice(`Error while writing ${processedFileName}: ${e}`)
+          this.notice(`Readwise: error while writing ${processedFileName}: ${e}`, true)
           if (bookID) {
             this.settings.booksToRefresh.push(bookID)
             await this.saveSettings()
@@ -260,7 +275,7 @@ export default class ReadwisePlugin extends Plugin {
     // close the ZipReader
     await zipReader.close();
     this.handleSyncSuccess(buttonContext, "Synced!", exportID)
-    new Notice("Readwise sync completed");
+    this.notice("Readwise sync completed", true);
   }
 
 
@@ -285,18 +300,18 @@ export default class ReadwisePlugin extends Plugin {
       return
     }
     let response
-    let formData = new FormData();
-    formData.append('exportTarget', 'obsidian');
-    bookIds.forEach((value, index) => {
-      formData.append('userBookIds[]', value);
-    });
+    // let formData = new FormData();
+    // formData.append('exportTarget', 'obsidian');
+    // bookIds.forEach((value, index) => {
+    //   formData.append('userBookIds[]', value);
+    // });
     try {
       fetch(
         `${baseURL}/api/refresh_book_export`,
         {
-          headers: this.getAuthHeaders(),
+          headers: {...this.getAuthHeaders(), 'Content-Type': 'application/json'},
           method: "POST",
-          body: formData
+          body: JSON.stringify({exportTarget: 'obsidian', books: bookIds})
         }
       ).then(response => {
         if (response && response.ok) {
@@ -363,17 +378,22 @@ export default class ReadwisePlugin extends Plugin {
     }
     this.addCommand({
       id: 'readwise-official-sync',
-      name: 'sync your data',
+      name: 'Sync your data now',
       callback: () => {
         if (this.settings.isSyncing) {
           console.log('skipping Readwise sync: already in progress');
-          new Notice("Readwise sync already in progress");
+          this.notice("Readwise sync already in progress");
         } else {
           this.settings.isSyncing = true;
           this.saveSettings();
           this.requestArchive();
         }
       }
+    });
+    this.addCommand({
+      id: 'readwise-official-format',
+      name: 'Customize formatting',
+      callback: () => window.open(`${baseURL}/export/obsidian/preferences`)
     });
     this.registerMarkdownPostProcessor((el, ctx) => {
       if (!ctx.sourcePath.startsWith(this.settings.readwiseDir)) {
@@ -391,7 +411,9 @@ export default class ReadwisePlugin extends Plugin {
     })
     this.addSettingTab(new ReadwiseSettingTab(this.app, this));
     this.configureSchedule();
-    if (this.settings.triggerOnLoad && !this.settings.isSyncing) {
+    if (this.settings.token && this.settings.triggerOnLoad && !this.settings.isSyncing) {
+      this.settings.silentRun = true
+      await this.saveSettings()
       this.requestArchive()
     }
   }
@@ -478,22 +500,23 @@ class ReadwiseSettingTab extends PluginSettingTab {
     containerEl.empty();
     containerEl.createEl('h1', {text: 'Readwise Official'});
     containerEl.createEl('p', {text: 'Created by '}).createEl('a', {text: 'Readwise', href: 'https://readwise.io'});
+    containerEl.getElementsByTagName('p')[0].appendText(' 📚')
     containerEl.createEl('h2', {text: 'Settings'});
 
     if (this.plugin.settings.token) {
       new Setting(containerEl)
         .setName("Sync your Readwise data with Obsidian")
-        .setDesc("On your first sync, the Readwise plugin will create a new folder Readwise containing all your highlights")
+        .setDesc("On first sync, the Readwise plugin will create a new folder containing all your highlights")
         .setClass('rw-setting-sync')
         .addButton((button) => {
-          button.setCta().setTooltip("Once the sync starts you can close settings tab").setButtonText('Initiate Sync')
+          button.setCta().setTooltip("Once the sync begins, you can close this plugin page")
+            .setButtonText('Initiate Sync')
             .onClick(() => {
               if (this.plugin.settings.isSyncing) {
                 // TODO: This is used to prevent multiple syncs at the same time. However, if a previous sync fails,
                 //  it can stop new syncs from happening. Make sure to set isSyncing to false
                 //  if there's ever errors/failures in previous sync attempts, so that
                 //  we don't block syncing subsequent times.
-                console.log('skipping sync init');
                 new Notice("Readwise sync already in progress");
               } else {
                 this.plugin.clearInfoStatus(containerEl)
@@ -519,24 +542,17 @@ class ReadwiseSettingTab extends PluginSettingTab {
         })
 
       new Setting(containerEl)
-        .setName('Base directory')
-        .setDesc("Folder into which save")
-        // .addSearch(searchComponent => {
-        //     searchComponent.onChanged = () => {
-        //       console.log('Serch changed')
-        //       return ['a']
-        //     }
-        //   })
+        .setName('Customize base folder')
+        .setDesc("By default, the plugin will save all your highlights into a folder named Readwise")
+        // TODO: change this to search filed when the API is exposed (https://github.com/obsidianmd/obsidian-api/issues/22)
         .addText(text => text
           .setPlaceholder('Defaults to: Readwise')
           .setValue(this.plugin.settings.readwiseDir)
           .onChange(async (value) => {
-            console.log(value)
-            if (value) {
-              this.plugin.settings.readwiseDir = value.replace(/\/+$/, "");
-              await this.plugin.saveSettings();
-            }
-          }));
+            const folderPath = value || "Readwise"
+            this.plugin.settings.readwiseDir = folderPath.replace(/\/+$/, "");
+            await this.plugin.saveSettings();
+          }))
 
       new Setting(containerEl)
         .setName('Configure resync frequency')
@@ -562,7 +578,7 @@ class ReadwiseSettingTab extends PluginSettingTab {
           })
         });
       new Setting(containerEl)
-        .setName("Resync when opening Obsidian")
+        .setName("Sync automatically when Obisidan opens")
         .setDesc("If enabled, Readwise will automatically resync with Obsidian each time you open the app")
         .addToggle((toggle) => {
             toggle.setValue(this.plugin.settings.triggerOnLoad)
@@ -604,6 +620,7 @@ class ReadwiseSettingTab extends PluginSettingTab {
       let el = containerEl.createEl("div", {cls: "rw-info-container"})
       containerEl.find(".rw-setting-connect > .setting-item-control ").prepend(el)
     }
-
+    const help = containerEl.createEl('p',)
+    help.innerHTML = "Question? Please see our <a href='https://help.readwise.io/article/125-how-does-the-readwise-to-obsidian-export-integration-work'>Documentation</a> or email us at <a href='mailto:hello@readwise.io'>hello@readwise.io</a> 🙂"
   }
 }
