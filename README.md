@@ -1,55 +1,24 @@
-## Obsidian Sample Plugin
+# Readwise Official
 
-This is a sample plugin for Obsidian (https://obsidian.md).
+![beta](https://img.shields.io/badge/version-beta-orange)
 
-This project uses Typescript to provide type checking and documentation.
-The repo depends on the latest plugin API (obsidian.d.ts) in Typescript Definition format, which contains TSDoc comments describing what it does.
+This is an official [Readwise](https://readwise.io) plugin for Obsidian maintained by Readwise team.
 
-**Note:** The Obsidian API is still in early alpha and is subject to change at any time!
+This version is a super early one, and it's not a proper release - we want to test it with a small batch of beta testers.
 
-This sample plugin demonstrates some of the basic functionality the plugin API can do.
-- Changes the default font color to red using `styles.css`.
-- Adds a ribbon icon, which shows a Notice when clicked.
-- Adds a command "Open Sample Modal" which opens a Modal.
-- Adds a plugin setting tab to the settings page.
-- Registers a global click event and output 'click' to the console.
-- Registers a global interval which logs 'setInterval' to the console.
+If you have any feedback - please reach out at [hello@readwise.io](mailto:hello@readwise.io)
 
-### First time developing plugins?
+## How this plugin works?
 
-Quick starting guide for new plugin devs:
+First and foremost it enables you to export all of your highlights from Readwise to Obsidian and keep them in sync afterwards (note that the sync is only one directional – deleting a highlight/book file from Obsidian won't affect your readwise data).
 
-- Make a copy of this repo as a template with the "Use this template" button.
-- Clone your repo to a local development folder. For convenience, you can place this folder in your `.obsidian/plugin/your-plugin-name` folder.
-- Install NodeJS, then run `npm i` in the command line under your repo folder.
-- Run `npm run dev` to compile your plugin from `main.ts` to `main.js`.
-- Make changes to `main.ts` (or create new `.ts` files). Those changes should be automatically compiled into `main.js`.
-- Reload Obsidian to load the new version of your plugin.
+### Configuration options
 
-### Releasing new releases
+[to be updated]
 
-- Update your `manifest.json` with your new version number, such as `1.0.1`, and the minimum Obsidian version required for your latest release.
-- Update your `versions.json` file with `"new-plugin-version": "minimum-obsidian-version"` so older versions of Obsidian can download an older version of your plugin that's compatible.
-- Create new GitHub release using your new version number as the "Tag version". Use the exact version number, don't include a prefix `v`. See here for an example: https://github.com/obsidianmd/obsidian-sample-plugin/releases
-- Upload the files `manifest.json`, `main.js`, `styles.css` as binary attachments.
-- Publish the release.
+## Feedback
 
-### Adding your plugin to the community plugin list
+If you have any questions/feedback regarding this plugin you can:
 
-- Publish an initial version.
-- Make sure you have a `README.md` file in the root of your repo.
-- Make a pull request at https://github.com/obsidianmd/obsidian-releases to add your plugin.
-
-### How to use
-
-- Clone this repo.
-- `npm i` or `yarn` to install dependencies
-- `npm run dev` to start compilation in watch mode.
-
-### Manually installing the plugin
-
-- Copy over `main.js`, `styles.css`, `manifest.json` to your vault `VaultFolder/.obsidian/plugins/your-plugin-id/`.
-
-### API Documentation
-
-See https://github.com/obsidianmd/obsidian-api
+- Send us an email at [hello@readwise.io](mailto:hello@readwise.io)
+- Create an issue in the plugin repository at https://github.com/readwiseio/obsidian-readwise/issues

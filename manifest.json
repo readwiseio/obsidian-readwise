@@ -1,10 +1,10 @@
 {
-	"id": "obsidian-readwise",
-	"name": "Readwise Sync",
-	"version": "1.0.1",
-	"minAppVersion": "0.9.12",
-	"description": "Automatically syncs your Readwise highlights into Obsidian.",
+	"id": "obsidian-readwise-official",
+	"name": "Readwise Official",
+	"version": "0.1.0",
+	"minAppVersion": "0.12.10",
+	"description": "Official Readwise <-> Obsidian integration",
 	"author": "Readwise",
 	"authorUrl": "https://readwise.io",
-	"isDesktopOnly": false
+	"isDesktopOnly": true
 }
