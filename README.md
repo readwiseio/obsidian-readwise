@@ -6,7 +6,7 @@ This official plugin maintained by the [Readwise](https://readwise.io) team enab
 export all your digital highlights to [Obsidian](https://obsidian.md) from a variety of sources such as Amazon Kindle,
 Apple Books, Google Play Books, Instapaper, Pocket, Medium, Twitter, PDFs, and more.
 
-![](img/readwise_obsidian_export.gif)
+![](https://raw.githubusercontent.com/readwiseio/obsidian-readwise/master/screens/readwise_obsidian_export.gif)
 
 Note: This plugin requires a subscription with [Readwise](https://readwise.io) — a paid service that makes it easy to
 aggregate and review all your reading data into one place.

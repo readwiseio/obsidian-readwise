@@ -1,7 +1,7 @@
 {
-	"id": "obsidian-readwise-official",
+	"id": "readwise-official",
 	"name": "Readwise Official",
-	"version": "0.1.0",
+	"version": "1.0.0",
 	"minAppVersion": "0.12.10",
 	"description": "Official Readwise <-> Obsidian integration",
 	"author": "Readwise",
