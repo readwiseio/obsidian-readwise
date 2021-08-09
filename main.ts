@@ -1,6 +1,5 @@
 import {App, ButtonComponent, DataAdapter, debounce, Notice, Plugin, PluginSettingTab, Setting, Vault} from 'obsidian';
 import * as zip from "@zip.js/zip.js";
-import {asyncWalk} from "estree-walker";
 
 
 require('electron');
@@ -110,12 +109,12 @@ export default class ReadwisePlugin extends Plugin {
         }
       )
     } catch (e) {
-      console.log("ReadwisePlugin: fetch failed in getExportStatus: ", e)
+      console.log("Readwise Official plugin: fetch failed in getExportStatus: ", e)
     }
     if (response && response.ok) {
       data = await response.json();
     } else {
-      console.log("ReadwisePlugin: bad response in requestArchive: ", response)
+      console.log("Readwise Official plugin: bad response in requestArchive: ", response)
       this.handleSyncError(buttonContext, `Readwise: ${response ? response.statusText : "Can't connect to server"}`)
       return
     }
@@ -156,7 +155,7 @@ export default class ReadwisePlugin extends Plugin {
         }
       )
     } catch (e) {
-      console.log("ReadwisePlugin: fetch failed in requestArchive: ", e)
+      console.log("Readwise Official plugin: fetch failed in requestArchive: ", e)
     }
     if (response && response.ok) {
       data = await response.json();
@@ -170,7 +169,7 @@ export default class ReadwisePlugin extends Plugin {
       this.notice("Syncing Readwise data");
       return this.getExportStatus(data.latest_id, buttonContext)
     } else {
-      console.log("ReadwisePlugin: bad response in requestArchive: ", response)
+      console.log("Readwise Official plugin: bad response in requestArchive: ", response)
       this.handleSyncError(buttonContext, `Readwise: ${response ? response.statusText : "Can't connect to server"}`)
       return
     }
@@ -202,7 +201,7 @@ export default class ReadwisePlugin extends Plugin {
   async downloadArchive(exportID: number, buttonContext: ButtonComponent): Promise<void> {
     let artifactURL = `${baseURL}/api/download_artifact/${exportID}`
     if (exportID <= this.settings.lastSavedStatusID) {
-      console.log(`Already saved data from export ${exportID}`)
+      console.log(`Readwise Official plugin: Already saved data from export ${exportID}`)
       this.handleSyncSuccess(buttonContext)
       this.notice("Readwise data is already up to date");
       return
@@ -214,12 +213,12 @@ export default class ReadwisePlugin extends Plugin {
         artifactURL, {headers: this.getAuthHeaders()}
       )
     } catch (e) {
-      console.log("ReadwisePlugin: fetch failed in downloadArchive: ", e)
+      console.log("Readwise Official plugin: fetch failed in downloadArchive: ", e)
     }
     if (response && response.ok) {
       blob = await response.blob();
     } else {
-      console.log("ReadwisePlugin: bad response in downloadArchive: ", response)
+      console.log("Readwise Official plugin: bad response in downloadArchive: ", response)
       this.handleSyncError(buttonContext, `Readwise: ${response ? response.statusText : "Can't connect to server"}`)
       return
     }
@@ -245,7 +244,6 @@ export default class ReadwisePlugin extends Plugin {
           const contents = await entry.getData(new zip.TextWriter())
           let contentToSave = contents
 
-
           let originalName = processedFileName
           // extracting book ID from file name
           let split = processedFileName.split("--")
@@ -262,7 +260,7 @@ export default class ReadwisePlugin extends Plugin {
           await this.fs.write(originalName, contentToSave)
           await this.saveSettings()
         } catch (e) {
-          console.log(`ReadwisePlugin: error writing ${processedFileName}:`, e)
+          console.log(`Readwise Official plugin: error writing ${processedFileName}:`, e)
           this.notice(`Readwise: error while writing ${processedFileName}: ${e}`, true)
           if (bookID) {
             this.settings.booksToRefresh.push(bookID)
@@ -282,7 +280,7 @@ export default class ReadwisePlugin extends Plugin {
   async configureSchedule() {
     const minutes = parseInt(this.settings.frequency)
     let milliseconds = minutes * 60 * 1000; // minutes * seconds * milliseconds
-    console.log('ReadwisePlugin: setting interval to ', milliseconds, 'milliseconds');
+    console.log('Readwise Official plugin: setting interval to ', milliseconds, 'milliseconds');
     window.clearInterval();
     if (!milliseconds) {
       // we got manual option
@@ -295,16 +293,9 @@ export default class ReadwisePlugin extends Plugin {
 
   refreshBookExport(bookIds?: Array<string>) {
     bookIds = bookIds || this.settings.booksToRefresh
-    console.log("refreshing books: ", bookIds)
     if (!bookIds.length) {
       return
     }
-    let response
-    // let formData = new FormData();
-    // formData.append('exportTarget', 'obsidian');
-    // bookIds.forEach((value, index) => {
-    //   formData.append('userBookIds[]', value);
-    // });
     try {
       fetch(
         `${baseURL}/api/refresh_book_export`,
@@ -320,7 +311,7 @@ export default class ReadwisePlugin extends Plugin {
           this.saveSettings()
           return
         } else {
-          console.log(`ReadwisePlugin: saving book id ${bookIds} to refresh later`)
+          console.log(`Readwise Official plugin: saving book id ${bookIds} to refresh later`)
           let booksToRefresh = this.settings.booksToRefresh
           booksToRefresh.concat(bookIds)
           this.settings.booksToRefresh = booksToRefresh
@@ -329,7 +320,7 @@ export default class ReadwisePlugin extends Plugin {
         }
       })
     } catch (e) {
-      console.log("ReadwisePlugin: fetch failed in refreshBookExport: ", e)
+      console.log("Readwise Official plugin: fetch failed in refreshBookExport: ", e)
     }
   }
 
@@ -341,7 +332,6 @@ export default class ReadwisePlugin extends Plugin {
   }
 
   async onload() {
-    console.log(baseURL)
     await this.loadSettings();
 
     this.refreshBookExport = debounce(
@@ -371,7 +361,7 @@ export default class ReadwisePlugin extends Plugin {
       if (this.settings.currentSyncStatusID) {
         this.getExportStatus()
       } else {
-        // we probably got some unhandled error?
+        // we probably got some unhandled error...
         this.settings.isSyncing = false
         await this.saveSettings()
       }
@@ -381,7 +371,6 @@ export default class ReadwisePlugin extends Plugin {
       name: 'Sync your data now',
       callback: () => {
         if (this.settings.isSyncing) {
-          console.log('skipping Readwise sync: already in progress');
           this.notice("Readwise sync already in progress");
         } else {
           this.settings.isSyncing = true;
@@ -418,8 +407,6 @@ export default class ReadwisePlugin extends Plugin {
     }
   }
   onunload() {
-    console.log('ReadwisePlugin: unloading');
-    // should we do something more here?
     fetch(
       `${baseURL}/api/obsidian/disconnect/`,
       {
@@ -452,13 +439,12 @@ export default class ReadwisePlugin extends Plugin {
         `${baseURL}/api/auth?token=${uuid}`
       )
     } catch (e) {
-      console.log("ReadwisePlugin: fetch failed in getUserAuthToken: ", e)
+      console.log("Readwise Official plugin: fetch failed in getUserAuthToken: ", e)
     }
     if (response && response.ok) {
       data = await response.json();
     } else {
-      console.log("ReadwisePlugin: bad response in getUserAuthToken: ", response)
-      // TODO: handle token error
+      console.log("Readwise Official plugin: bad response in getUserAuthToken: ", response)
       this.showInfoStatus(button.parentElement, "Authorization failed. Try again", "rw-error")
       return
     }
@@ -470,17 +456,14 @@ export default class ReadwisePlugin extends Plugin {
       this.settings.token = data.userAccessToken;
     } else {
       if (attempt > 20) {
-        console.log('ReadwisePlugin: reached attempt limit in getUserAuthToken')
+        console.log('Readwise Official plugin: reached attempt limit in getUserAuthToken')
         return
       }
-      console.log(`ReadwisePlugin: didn't get token data, retrying (attempt ${attempt + 1})`)
+      console.log(`Readwise Official plugin: didn't get token data, retrying (attempt ${attempt + 1})`)
       await new Promise(resolve => setTimeout(resolve, 1000));
       await this.getUserAuthToken(button, attempt + 1)
     }
     this.saveSettings()
-
-    // change our button text
-    button.setText("Reconnect");
     return true
   }
 }
@@ -513,7 +496,7 @@ class ReadwiseSettingTab extends PluginSettingTab {
             .setButtonText('Initiate Sync')
             .onClick(() => {
               if (this.plugin.settings.isSyncing) {
-                // TODO: This is used to prevent multiple syncs at the same time. However, if a previous sync fails,
+                // NOTE: This is used to prevent multiple syncs at the same time. However, if a previous sync fails,
                 //  it can stop new syncs from happening. Make sure to set isSyncing to false
                 //  if there's ever errors/failures in previous sync attempts, so that
                 //  we don't block syncing subsequent times.
@@ -531,7 +514,6 @@ class ReadwiseSettingTab extends PluginSettingTab {
       let el = containerEl.createEl("div", {cls: "rw-info-container"})
       containerEl.find(".rw-setting-sync > .setting-item-control ").prepend(el)
 
-      // let descriptionText = this.plugin.settings.token != "" ? "Token saved." : "No token set.";
       new Setting(containerEl)
         .setName("Customize formatting options")
         .setDesc("You can customize which items export to Obsidian and how they appear from the Readwise website")
@@ -567,11 +549,9 @@ class ReadwiseSettingTab extends PluginSettingTab {
           dropdown.setValue(this.plugin.settings.frequency);
 
           dropdown.onChange((newValue) => {
-            console.log('newValue set', newValue)
-
             // update the plugin settings
             this.plugin.settings.frequency = newValue;
-            this.plugin.saveData(this.plugin.settings);
+            this.plugin.saveSettings();
 
             // destroy & re-create the scheduled task
             this.plugin.configureSchedule();
