@@ -13,6 +13,7 @@ import {
 import * as zip from "@zip.js/zip.js";
 
 
+// the process.env variable will be replaced by it's target value in the output main.js file
 const baseURL = process.env.READWISE_SERVER_URL || "https://readwise.io";
 
 interface ReadwiseAuthResponse {
@@ -400,7 +401,9 @@ export default class ReadwisePlugin extends Plugin {
       const hypers = el.findAll("strong").filter(e => matches.contains(e.textContent));
       hypers.forEach(strongEl => {
         const replacement = el.createEl('span');
-        replacement.innerHTML = strongEl.innerHTML;
+        while (strongEl.childNodes.length > 0) {
+          replacement.appendChild(strongEl.childNodes[0]);
+        }
         replacement.addClass("rw-hyper-highlight");
         strongEl.replaceWith(replacement);
       });
