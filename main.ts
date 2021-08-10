@@ -418,13 +418,6 @@ export default class ReadwisePlugin extends Plugin {
   }
 
   onunload() {
-    fetch(
-      `${baseURL}/api/obsidian/disconnect/`,
-      {
-        headers: this.getAuthHeaders(),
-        method: "POST",
-      }
-    );
     this.settings.token = null;
     this.saveSettings();
   }
