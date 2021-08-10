@@ -349,10 +349,10 @@ export default class ReadwisePlugin extends Plugin {
     );
 
     this.refreshBookExport(this.settings.booksToRefresh);
-    this.app.vault.on("delete", (file) => {
+    this.app.vault.on("delete", async (file) => {
       const bookId = this.settings.booksIDsMap[file.path];
       if (this.settings.refreshBooks && bookId) {
-        this.addBookToRefresh(bookId);
+        await this.addBookToRefresh(bookId);
       }
       this.refreshBookExport();
     });
@@ -367,7 +367,7 @@ export default class ReadwisePlugin extends Plugin {
     });
     if (this.settings.isSyncing) {
       if (this.settings.currentSyncStatusID) {
-        this.getExportStatus();
+        await this.getExportStatus();
       } else {
         // we probably got some unhandled error...
         this.settings.isSyncing = false;
@@ -409,11 +409,11 @@ export default class ReadwisePlugin extends Plugin {
       });
     });
     this.addSettingTab(new ReadwiseSettingTab(this.app, this));
-    this.configureSchedule();
+    await this.configureSchedule();
     if (this.settings.token && this.settings.triggerOnLoad && !this.settings.isSyncing) {
       this.settings.silentRun = true;
       await this.saveSettings();
-      this.requestArchive();
+      await this.requestArchive();
     }
   }
 
@@ -467,7 +467,7 @@ export default class ReadwisePlugin extends Plugin {
       await new Promise(resolve => setTimeout(resolve, 1000));
       await this.getUserAuthToken(button, attempt + 1);
     }
-    this.saveSettings();
+    await this.saveSettings();
     return true;
   }
 }
@@ -498,7 +498,7 @@ class ReadwiseSettingTab extends PluginSettingTab {
         .addButton((button) => {
           button.setCta().setTooltip("Once the sync begins, you can close this plugin page")
             .setButtonText('Initiate Sync')
-            .onClick(() => {
+            .onClick(async () => {
               if (this.plugin.settings.isSyncing) {
                 // NOTE: This is used to prevent multiple syncs at the same time. However, if a previous sync fails,
                 //  it can stop new syncs from happening. Make sure to set isSyncing to false
@@ -508,9 +508,9 @@ class ReadwiseSettingTab extends PluginSettingTab {
               } else {
                 this.plugin.clearInfoStatus(containerEl);
                 this.plugin.settings.isSyncing = true;
-                this.plugin.saveData(this.plugin.settings);
-                this.plugin.requestArchive(button);
+                await this.plugin.saveData(this.plugin.settings);
                 button.setButtonText("Syncing...");
+                await this.plugin.requestArchive(button);
               }
 
             });
