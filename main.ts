@@ -418,8 +418,8 @@ export default class ReadwisePlugin extends Plugin {
   }
 
   onunload() {
-    this.settings.token = null;
-    this.saveSettings();
+    // we're not doing anything here for now...
+    return
   }
 
   async loadSettings() {
