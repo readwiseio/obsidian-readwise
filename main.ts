@@ -535,8 +535,7 @@ class ReadwiseSettingTab extends PluginSettingTab {
           .setPlaceholder('Defaults to: Readwise')
           .setValue(this.plugin.settings.readwiseDir)
           .onChange(async (value) => {
-            const folderPath = value || "Readwise";
-            this.plugin.settings.readwiseDir = folderPath.replace(/\/+$/, "");
+            this.plugin.settings.readwiseDir = normalizePath(value || "Readwise");
             await this.plugin.saveSettings();
           }));
 

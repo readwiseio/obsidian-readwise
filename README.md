@@ -32,4 +32,5 @@ Note: This plugin requires a subscription with [Readwise](https://readwise.io) â
 
 ## Community Resources
 
-* As the Obsidian community creates resources explaining their use of the Readwise Official plugin, we'll add those links here!
+* [First Look at the Official Readwise Obsidian Plugin](https://medium.com/@benenewton/first-look-at-the-official-readwise-obsidian-plugin-5d553c0d0521) article by Ben Newton
+* [ðŸ˜± Readwise + Obsidian](https://www.youtube.com/watch?v=Gr7kMb-Fwj8) video by Effective Remote Work

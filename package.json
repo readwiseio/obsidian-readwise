@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "rollup --config rollup.config.js -w",
     "build": "rollup --config rollup.config.js --environment READWISE_SERVER_URL:https://readwise.io",
-    "dist": "npm run build && mkdir -p dist/obsidian-readwise && cp styles.css main.js versions.json manifest.json dist/obsidian-readwise"
+    "dist": "npm run build && mkdir -p dist && cp styles.css main.js manifest.json dist"
   },
   "keywords": [
     "obsidian",
