@@ -561,7 +561,7 @@ class ReadwiseSettingTab extends PluginSettingTab {
           });
         });
       new Setting(containerEl)
-        .setName("Sync automatically when Obisidan opens")
+        .setName("Sync automatically when Obsidian opens")
         .setDesc("If enabled, Readwise will automatically resync with Obsidian each time you open the app")
         .addToggle((toggle) => {
             toggle.setValue(this.plugin.settings.triggerOnLoad);
