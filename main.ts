@@ -396,8 +396,14 @@ export default class ReadwisePlugin extends Plugin {
       if (!ctx.sourcePath.startsWith(this.settings.readwiseDir)) {
         return;
       }
-      // @ts-ignore
-      let matches = [...ctx.getSectionInfo(el).text.matchAll(/__(.+)__/g)].map((a) => a[1]);
+      let matches: string[]
+      try {
+        // @ts-ignore
+        matches = [...ctx.getSectionInfo(el).text.matchAll(/__(.+)__/g)].map((a) => a[1]);
+      } catch (TypeError) {
+        // failed interaction with a Dataview element
+        return
+      }
       const hypers = el.findAll("strong").filter(e => matches.contains(e.textContent));
       hypers.forEach(strongEl => {
         const replacement = el.createEl('span');
