@@ -301,7 +301,7 @@ export default class ReadwisePlugin extends Plugin {
 
   refreshBookExport(bookIds?: Array<string>) {
     bookIds = bookIds || this.settings.booksToRefresh;
-    if (!bookIds.length) {
+    if (!bookIds.length || !this.settings.refreshBooks) {
       return;
     }
     try {
@@ -351,7 +351,7 @@ export default class ReadwisePlugin extends Plugin {
     this.refreshBookExport(this.settings.booksToRefresh);
     this.app.vault.on("delete", async (file) => {
       const bookId = this.settings.booksIDsMap[file.path];
-      if (this.settings.refreshBooks && bookId) {
+      if (bookId) {
         await this.addBookToRefresh(bookId);
       }
       this.refreshBookExport();
@@ -582,9 +582,12 @@ class ReadwiseSettingTab extends PluginSettingTab {
         .setDesc("If enabled, you can refresh individual items by deleting the file in Obsidian and initiating a resync")
         .addToggle((toggle) => {
             toggle.setValue(this.plugin.settings.refreshBooks);
-            toggle.onChange((val) => {
+            toggle.onChange(async(val) => {
               this.plugin.settings.refreshBooks = val;
-              this.plugin.saveSettings();
+              await this.plugin.saveSettings();
+              if (val) {
+                this.plugin.refreshBookExport();
+              }
             });
           }
         );
