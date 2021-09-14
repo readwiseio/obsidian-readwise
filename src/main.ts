@@ -11,6 +11,7 @@ import {
   Vault
 } from 'obsidian';
 import * as zip from "@zip.js/zip.js";
+import {StatusBar} from "./status";
 
 
 // the process.env variable will be replaced by its target value in the output main.js file
@@ -34,10 +35,8 @@ interface ExportStatusResponse {
 
 interface ReadwisePluginSettings {
   token: string;
-  obsidianToken: string;
   readwiseDir: string;
   isSyncing: boolean;
-  silentRun: boolean;
   frequency: string;
   triggerOnLoad: boolean;
   lastSyncFailed: boolean;
@@ -51,11 +50,9 @@ interface ReadwisePluginSettings {
 // define our initial settings
 const DEFAULT_SETTINGS: ReadwisePluginSettings = {
   token: "",
-  obsidianToken: "",
   readwiseDir: "Readwise",
   frequency: "0", // manual by default
   triggerOnLoad: true,
-  silentRun: false,
   isSyncing: false,
   lastSyncFailed: false,
   lastSavedStatusID: 0,
@@ -70,6 +67,17 @@ export default class ReadwisePlugin extends Plugin {
   fs: DataAdapter;
   vault: Vault;
   scheduleInterval: null | number = null;
+  statusBar: StatusBar;
+
+  getErrorMessageFromResponse(response: Response) {
+    if (response && response.status === 409) {
+      return "Sync in progress initiated by different client"
+    }
+    if (response && response.status === 417) {
+      return "Obsidian export is locked. Wait for an hour."
+    }
+    return `${response ? response.statusText : "Can't connect to server"}`
+  }
 
   handleSyncError(buttonContext: ButtonComponent, msg: string) {
     this.clearSettingsAfterRun();
@@ -79,13 +87,12 @@ export default class ReadwisePlugin extends Plugin {
       this.showInfoStatus(buttonContext.buttonEl.parentElement, msg, "rw-error");
       buttonContext.buttonEl.setText("Run sync");
     } else {
-      this.notice(msg, true);
+      this.notice(msg, true, 4, true);
     }
   }
 
   clearSettingsAfterRun() {
     this.settings.isSyncing = false;
-    this.settings.silentRun = false;
     this.settings.currentSyncStatusID = 0;
   }
 
@@ -122,8 +129,8 @@ export default class ReadwisePlugin extends Plugin {
     if (response && response.ok) {
       data = await response.json();
     } else {
-      console.log("Readwise Official plugin: bad response in requestArchive: ", response);
-      this.handleSyncError(buttonContext, `Readwise: ${response ? response.statusText : "Can't connect to server"}`);
+      console.log("Readwise Official plugin: bad response in getExportStatus: ", response);
+      this.handleSyncError(buttonContext, this.getErrorMessageFromResponse(response));
       return;
     }
     const WAITING_STATUSES = ['PENDING', 'RECEIVED', 'STARTED', 'RETRY'];
@@ -169,7 +176,7 @@ export default class ReadwisePlugin extends Plugin {
       data = await response.json();
       if (data.latest_id <= this.settings.lastSavedStatusID) {
         this.handleSyncSuccess(buttonContext);
-        this.notice("Readwise data is already up to date");
+        this.notice("Readwise data is already up to date", false, 4, true);
         return;
       }
       this.settings.currentSyncStatusID = data.latest_id;
@@ -178,15 +185,16 @@ export default class ReadwisePlugin extends Plugin {
       return this.getExportStatus(data.latest_id, buttonContext);
     } else {
       console.log("Readwise Official plugin: bad response in requestArchive: ", response);
-      this.handleSyncError(buttonContext, `Readwise: ${response ? response.statusText : "Can't connect to server"}`);
+      this.handleSyncError(buttonContext, this.getErrorMessageFromResponse(response));
       return;
     }
   }
 
-  notice(msg: string, force = false) {
-    if (force || !this.settings.silentRun) {
+  notice(msg: string, show = false, timeout = 0, forcing: boolean = false) {
+    if (show) {
       new Notice(msg);
     }
+    this.statusBar.displayMessage(msg.toLowerCase(), timeout, forcing);
   }
 
   showInfoStatus(container: HTMLElement, msg: string, className = "") {
@@ -202,7 +210,8 @@ export default class ReadwisePlugin extends Plugin {
 
   getAuthHeaders() {
     return {
-      'AUTHORIZATION': `Token ${this.settings.token}`
+      'AUTHORIZATION': `Token ${this.settings.token}`,
+      'Obsidian-Client': `${this.getObsidianClientID()}`,
     };
   }
 
@@ -211,7 +220,7 @@ export default class ReadwisePlugin extends Plugin {
     if (exportID <= this.settings.lastSavedStatusID) {
       console.log(`Readwise Official plugin: Already saved data from export ${exportID}`);
       this.handleSyncSuccess(buttonContext);
-      this.notice("Readwise data is already up to date");
+      this.notice("Readwise data is already up to date", false, 4);
       return;
     }
 
@@ -227,7 +236,7 @@ export default class ReadwisePlugin extends Plugin {
       blob = await response.blob();
     } else {
       console.log("Readwise Official plugin: bad response in downloadArchive: ", response);
-      this.handleSyncError(buttonContext, `Readwise: ${response ? response.statusText : "Can't connect to server"}`);
+      this.handleSyncError(buttonContext, this.getErrorMessageFromResponse(response));
       return;
     }
 
@@ -236,7 +245,7 @@ export default class ReadwisePlugin extends Plugin {
     const blobReader = new zip.BlobReader(blob);
     const zipReader = new zip.ZipReader(blobReader);
     const entries = await zipReader.getEntries();
-    this.notice("Saving files...");
+    this.notice("Saving files...", false, 30);
     if (entries.length) {
       for (const entry of entries) {
         let bookID: string;
@@ -269,7 +278,7 @@ export default class ReadwisePlugin extends Plugin {
           await this.saveSettings();
         } catch (e) {
           console.log(`Readwise Official plugin: error writing ${processedFileName}:`, e);
-          this.notice(`Readwise: error while writing ${processedFileName}: ${e}`, true);
+          this.notice(`Readwise: error while writing ${processedFileName}: ${e}`, true, 4, true);
           if (bookID) {
             this.settings.booksToRefresh.push(bookID);
             await this.saveSettings();
@@ -280,10 +289,31 @@ export default class ReadwisePlugin extends Plugin {
     }
     // close the ZipReader
     await zipReader.close();
+    await this.acknowledgeSyncCompleted(buttonContext)
     this.handleSyncSuccess(buttonContext, "Synced!", exportID);
-    this.notice("Readwise sync completed", true);
+    this.notice("Readwise sync completed", true, 1, true);
   }
 
+  async acknowledgeSyncCompleted(buttonContext: ButtonComponent) {
+    let response;
+    try {
+      response = await fetch(
+        `${baseURL}/api/obsidian/sync_ack`,
+        {
+          headers: {...this.getAuthHeaders(), 'Content-Type': 'application/json'},
+          method: "POST",
+        })
+    } catch (e) {
+      console.log("Readwise Official plugin: fetch failed to acknowledged sync: ", e);
+    }
+    if (response && response.ok) {
+      return
+    } else {
+      console.log("Readwise Official plugin: bad response in acknowledge sync: ", response);
+      this.handleSyncError(buttonContext, this.getErrorMessageFromResponse(response));
+      return;
+    }
+  }
 
   async configureSchedule() {
     const minutes = parseInt(this.settings.frequency);
@@ -340,8 +370,11 @@ export default class ReadwisePlugin extends Plugin {
   }
 
   async onload() {
+    this.statusBar = new StatusBar(this.addStatusBarItem());
+    this.registerInterval(
+      window.setInterval(() => this.statusBar.display(), 1000)
+    );
     await this.loadSettings();
-
     this.refreshBookExport = debounce(
       this.refreshBookExport.bind(this),
       800,
@@ -379,7 +412,7 @@ export default class ReadwisePlugin extends Plugin {
       name: 'Sync your data now',
       callback: () => {
         if (this.settings.isSyncing) {
-          this.notice("Readwise sync already in progress");
+          this.notice("Readwise sync already in progress", true);
         } else {
           this.settings.isSyncing = true;
           this.saveSettings();
@@ -396,13 +429,13 @@ export default class ReadwisePlugin extends Plugin {
       if (!ctx.sourcePath.startsWith(this.settings.readwiseDir)) {
         return;
       }
-      let matches: string[]
+      let matches: string[];
       try {
         // @ts-ignore
         matches = [...ctx.getSectionInfo(el).text.matchAll(/__(.+)__/g)].map((a) => a[1]);
       } catch (TypeError) {
         // failed interaction with a Dataview element
-        return
+        return;
       }
       const hypers = el.findAll("strong").filter(e => matches.contains(e.textContent));
       hypers.forEach(strongEl => {
@@ -417,7 +450,6 @@ export default class ReadwisePlugin extends Plugin {
     this.addSettingTab(new ReadwiseSettingTab(this.app, this));
     await this.configureSchedule();
     if (this.settings.token && this.settings.triggerOnLoad && !this.settings.isSyncing) {
-      this.settings.silentRun = true;
       await this.saveSettings();
       await this.requestArchive();
     }
@@ -425,7 +457,7 @@ export default class ReadwisePlugin extends Plugin {
 
   onunload() {
     // we're not doing anything here for now...
-    return
+    return;
   }
 
   async loadSettings() {
@@ -436,8 +468,19 @@ export default class ReadwisePlugin extends Plugin {
     await this.saveData(this.settings);
   }
 
+  getObsidianClientID() {
+    let obsidianClientId = window.localStorage.getItem('rw-ObsidianClientId')
+    if (obsidianClientId) {
+      return obsidianClientId
+    } else {
+      obsidianClientId = Math.random().toString(36).substring(2, 15)
+      window.localStorage.setItem('rw-ObsidianClientId', obsidianClientId)
+      return obsidianClientId
+    }
+  }
+
   async getUserAuthToken(button: HTMLElement, attempt = 0) {
-    let uuid = this.settings.obsidianToken || Math.random().toString(36).substring(2, 15);
+    let uuid = this.getObsidianClientID()
 
     if (attempt === 0) {
       window.open(`${baseURL}/api_auth?token=${uuid}&service=obsidian`);
@@ -457,10 +500,6 @@ export default class ReadwisePlugin extends Plugin {
       console.log("Readwise Official plugin: bad response in getUserAuthToken: ", response);
       this.showInfoStatus(button.parentElement, "Authorization failed. Try again", "rw-error");
       return;
-    }
-    if (!this.settings.obsidianToken) {
-      this.settings.obsidianToken = uuid;
-      await this.saveSettings();
     }
     if (data.userAccessToken) {
       this.settings.token = data.userAccessToken;
