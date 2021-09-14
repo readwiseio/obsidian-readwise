@@ -35,7 +35,6 @@ interface ExportStatusResponse {
 
 interface ReadwisePluginSettings {
   token: string;
-  obsidianToken: string;
   readwiseDir: string;
   isSyncing: boolean;
   frequency: string;
@@ -51,7 +50,6 @@ interface ReadwisePluginSettings {
 // define our initial settings
 const DEFAULT_SETTINGS: ReadwisePluginSettings = {
   token: "",
-  obsidianToken: "",
   readwiseDir: "Readwise",
   frequency: "0", // manual by default
   triggerOnLoad: true,
@@ -213,7 +211,7 @@ export default class ReadwisePlugin extends Plugin {
   getAuthHeaders() {
     return {
       'AUTHORIZATION': `Token ${this.settings.token}`,
-      'Obsidian-Client': `${this.settings.obsidianToken}`,
+      'Obsidian-Client': `${this.getObsidianClientID()}`,
     };
   }
 
@@ -470,8 +468,19 @@ export default class ReadwisePlugin extends Plugin {
     await this.saveData(this.settings);
   }
 
+  getObsidianClientID() {
+    let obsidianClientId = window.localStorage.getItem('rw-ObsidianClientId')
+    if (obsidianClientId) {
+      return obsidianClientId
+    } else {
+      obsidianClientId = Math.random().toString(36).substring(2, 15)
+      window.localStorage.setItem('rw-ObsidianClientId', obsidianClientId)
+      return obsidianClientId
+    }
+  }
+
   async getUserAuthToken(button: HTMLElement, attempt = 0) {
-    let uuid = this.settings.obsidianToken || Math.random().toString(36).substring(2, 15);
+    let uuid = this.getObsidianClientID()
 
     if (attempt === 0) {
       window.open(`${baseURL}/api_auth?token=${uuid}&service=obsidian`);
@@ -491,10 +500,6 @@ export default class ReadwisePlugin extends Plugin {
       console.log("Readwise Official plugin: bad response in getUserAuthToken: ", response);
       this.showInfoStatus(button.parentElement, "Authorization failed. Try again", "rw-error");
       return;
-    }
-    if (!this.settings.obsidianToken) {
-      this.settings.obsidianToken = uuid;
-      await this.saveSettings();
     }
     if (data.userAccessToken) {
       this.settings.token = data.userAccessToken;
