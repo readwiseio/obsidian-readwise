@@ -75,6 +75,9 @@ export default class ReadwisePlugin extends Plugin {
     if (response && response.status === 409) {
       return "Sync in progress initiated by different client"
     }
+    if (response && response.status === 417) {
+      return "Obsidian export is locked. Wait for an hour."
+    }
     return `${response ? response.statusText : "Can't connect to server"}`
   }
 
@@ -306,7 +309,7 @@ export default class ReadwisePlugin extends Plugin {
       console.log("Readwise Official plugin: fetch failed to acknowledged sync: ", e);
     }
     if (response && response.ok) {
-
+      return
     } else {
       console.log("Readwise Official plugin: bad response in acknowledge sync: ", response);
       this.handleSyncError(buttonContext, this.getErrorMessageFromResponse(response));

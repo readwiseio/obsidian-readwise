@@ -29,17 +29,17 @@ export class StatusBar {
   }
 
   display() {
-    const showMessage = !this.currentMessage;
-    if (this.messages.length > 0 && showMessage) {
-      this.currentMessage = this.messages.shift();
-      this.statusBarEl.setText(this.currentMessage.message);
-      this.lastMessageTimestamp = Date.now();
-    } else if (this.currentMessage) {
+    if (this.currentMessage) {
       let messageAge = Date.now() - this.lastMessageTimestamp;
       if (messageAge >= this.currentMessage.timeout) {
         this.currentMessage = null;
         this.lastMessageTimestamp = null;
       }
+    } else if (this.messages.length) {
+      this.currentMessage = this.messages.shift();
+      this.statusBarEl.setText(this.currentMessage.message);
+      this.lastMessageTimestamp = Date.now();
+      return;
     } else {
       this.statusBarEl.setText("");
     }
