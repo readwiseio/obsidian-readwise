@@ -194,7 +194,14 @@ export default class ReadwisePlugin extends Plugin {
     if (show) {
       new Notice(msg);
     }
-    this.statusBar.displayMessage(msg.toLowerCase(), timeout, forcing);
+    // @ts-ignore
+    if (!this.app.isMobile) {
+      this.statusBar.displayMessage(msg.toLowerCase(), timeout, forcing);
+    } else {
+      if (!show) {
+        new Notice(msg)
+      }
+    }
   }
 
   showInfoStatus(container: HTMLElement, msg: string, className = "") {
@@ -292,6 +299,10 @@ export default class ReadwisePlugin extends Plugin {
     await this.acknowledgeSyncCompleted(buttonContext)
     this.handleSyncSuccess(buttonContext, "Synced!", exportID);
     this.notice("Readwise sync completed", true, 1, true);
+    // @ts-ignore
+    if (this.app.isMobile) {
+      this.notice("If you don't see all of your readwise files reload obsidian app", true,);
+    }
   }
 
   async acknowledgeSyncCompleted(buttonContext: ButtonComponent) {
@@ -370,10 +381,13 @@ export default class ReadwisePlugin extends Plugin {
   }
 
   async onload() {
-    this.statusBar = new StatusBar(this.addStatusBarItem());
-    this.registerInterval(
-      window.setInterval(() => this.statusBar.display(), 1000)
-    );
+    // @ts-ignore
+    if (!this.app.isMobile) {
+      this.statusBar = new StatusBar(this.addStatusBarItem());
+      this.registerInterval(
+        window.setInterval(() => this.statusBar.display(), 1000)
+      );
+    }
     await this.loadSettings();
     this.refreshBookExport = debounce(
       this.refreshBookExport.bind(this),
