@@ -33,4 +33,10 @@ Note: This plugin requires a subscription with [Readwise](https://readwise.io) â
 ## Community Resources
 
 * [First Look at the Official Readwise Obsidian Plugin](https://medium.com/@benenewton/first-look-at-the-official-readwise-obsidian-plugin-5d553c0d0521) article by Ben Newton
-* [ðŸ˜± Readwise + Obsidian](https://www.youtube.com/watch?v=Gr7kMb-Fwj8) video by Effective Remote Work
+* [Getting Started with the Readwise Official Plugin](https://www.youtube.com/watch?v=Gr7kMb-Fwj8) video by Effective Remote Work
+* [Readwise Obsidian Plugin - Is It Any Good?](https://www.youtube.com/watch?v=g_5Pk7XwDFg) video by Santi Younger
+* [Building a Second Brain with Readwise + Obsidian](https://www.youtube.com/watch?v=2lYwz-oK_YM) video by Systematic Mastery
+* [Making Unexpected Connections with Readwise and Obsidian](https://www.youtube.com/watch?v=tUfTaEhqZU8&t=27s) video by Curtis McHale
+* [How I View My Latest Readwise Highlights in My Obsidian Daily Note](https://benenewton.medium.com/how-i-view-my-latest-readwise-highlights-in-my-obsidian-daily-note-3d321dd6ed07) article by Ben Newton
+* [Color Code Your Readwise Highlights in Obsidian](https://github.com/chetachiezikeuzor/Obsidian-Snippets/blob/main/Pretty%20Highlights.css) with Chetachi's CSS snippets
+* [How to Import Your Shortform Highlights Into Obsidian Using Readwise](https://nicolevanderhoeven.com/blog/20210815-shortform-to-readwise/) article by Nicole van der Hoeven
