@@ -3,6 +3,8 @@ import {
   ButtonComponent,
   DataAdapter,
   debounce,
+  Editor,
+  MarkdownView, Modal,
   normalizePath,
   Notice,
   Plugin,
@@ -45,6 +47,7 @@ interface ReadwisePluginSettings {
   refreshBooks: boolean,
   booksToRefresh: Array<string>;
   booksIDsMap: { [key: string]: string; };
+  reimportShowConfirmation: boolean;
 }
 
 // define our initial settings
@@ -59,7 +62,8 @@ const DEFAULT_SETTINGS: ReadwisePluginSettings = {
   currentSyncStatusID: 0,
   refreshBooks: true,
   booksToRefresh: [],
-  booksIDsMap: {}
+  booksIDsMap: {},
+  reimportShowConfirmation: true,
 };
 
 export default class ReadwisePlugin extends Plugin {
@@ -71,12 +75,12 @@ export default class ReadwisePlugin extends Plugin {
 
   getErrorMessageFromResponse(response: Response) {
     if (response && response.status === 409) {
-      return "Sync in progress initiated by different client"
+      return "Sync in progress initiated by different client";
     }
     if (response && response.status === 417) {
-      return "Obsidian export is locked. Wait for an hour."
+      return "Obsidian export is locked. Wait for an hour.";
     }
-    return `${response ? response.statusText : "Can't connect to server"}`
+    return `${response ? response.statusText : "Can't connect to server"}`;
   }
 
   handleSyncError(buttonContext: ButtonComponent, msg: string) {
@@ -199,7 +203,7 @@ export default class ReadwisePlugin extends Plugin {
       this.statusBar.displayMessage(msg.toLowerCase(), timeout, forcing);
     } else {
       if (!show) {
-        new Notice(msg)
+        new Notice(msg);
       }
     }
   }
@@ -296,7 +300,7 @@ export default class ReadwisePlugin extends Plugin {
     }
     // close the ZipReader
     await zipReader.close();
-    await this.acknowledgeSyncCompleted(buttonContext)
+    await this.acknowledgeSyncCompleted(buttonContext);
     this.handleSyncSuccess(buttonContext, "Synced!", exportID);
     this.notice("Readwise sync completed", true, 1, true);
     // @ts-ignore
@@ -313,12 +317,12 @@ export default class ReadwisePlugin extends Plugin {
         {
           headers: {...this.getAuthHeaders(), 'Content-Type': 'application/json'},
           method: "POST",
-        })
+        });
     } catch (e) {
       console.log("Readwise Official plugin: fetch failed to acknowledged sync: ", e);
     }
     if (response && response.ok) {
-      return
+      return;
     } else {
       console.log("Readwise Official plugin: bad response in acknowledge sync: ", response);
       this.handleSyncError(buttonContext, this.getErrorMessageFromResponse(response));
@@ -380,6 +384,43 @@ export default class ReadwisePlugin extends Plugin {
     await this.saveSettings();
   }
 
+  reimportFile(vault: Vault, fileName: string) {
+    const bookId = this.settings.booksIDsMap[fileName];
+    try {
+      fetch(
+        `${baseURL}/api/refresh_book_export`,
+        {
+          headers: {...this.getAuthHeaders(), 'Content-Type': 'application/json'},
+          method: "POST",
+          body: JSON.stringify({exportTarget: 'obsidian', books: [bookId]})
+        }
+      ).then(response => {
+        if (response && response.ok) {
+          let booksToRefresh = this.settings.booksToRefresh;
+          this.settings.booksToRefresh = booksToRefresh.filter(n => ![bookId].includes(n));
+          this.saveSettings();
+          vault.delete(vault.getAbstractFileByPath(fileName));
+          this.startSync();
+        } else {
+          this.notice("Failed to reimport. Please try again", true);
+        }
+      });
+    } catch (e) {
+      console.log("Readwise Official plugin: fetch failed in Reimport current file: ", e);
+    }
+  }
+
+  startSync() {
+    if (this.settings.isSyncing) {
+      this.notice("Readwise sync already in progress", true);
+    } else {
+      this.settings.isSyncing = true;
+      this.saveSettings();
+      this.requestArchive();
+    }
+    console.log("started sync");
+  }
+
   async onload() {
     // @ts-ignore
     if (!this.app.isMobile) {
@@ -425,19 +466,54 @@ export default class ReadwisePlugin extends Plugin {
       id: 'readwise-official-sync',
       name: 'Sync your data now',
       callback: () => {
-        if (this.settings.isSyncing) {
-          this.notice("Readwise sync already in progress", true);
-        } else {
-          this.settings.isSyncing = true;
-          this.saveSettings();
-          this.requestArchive();
-        }
+        this.startSync();
       }
     });
     this.addCommand({
       id: 'readwise-official-format',
       name: 'Customize formatting',
       callback: () => window.open(`${baseURL}/export/obsidian/preferences`)
+    });
+    this.addCommand({
+      id: 'readwise-official-reimport-file',
+      name: 'Delete and reimport this document',
+      editorCheckCallback: (checking: boolean, editor: Editor, view: MarkdownView) => {
+        const activeFilePath = view.file.path;
+        const isRWfile = activeFilePath in this.settings.booksIDsMap;
+        if (checking) {
+          return isRWfile;
+        }
+        if (this.settings.reimportShowConfirmation) {
+          const modal = new Modal(view.app);
+          modal.contentEl.createEl(
+            'p',
+            {
+              'text': 'Warning: Proceeding will delete this file entirely (including any changes you made) ' +
+                'and then reimport a new copy of your highlights from Readwise.'
+            });
+          const buttonsContainer = modal.contentEl.createEl('div', {"cls": "rw-modal-btns"});
+          const cancelBtn = buttonsContainer.createEl("button", {"text": "Cancel"});
+          const confirmBtn = buttonsContainer.createEl("button", {"text": "Proceed", 'cls': 'mod-warning'});
+          const showConfContainer = modal.contentEl.createEl('div', {'cls': 'rw-modal-confirmation'});
+          showConfContainer.createEl("label", {"attr": {"for": "rw-ask-nl"}, "text": "Don't ask me in the future"});
+          const showConf = showConfContainer.createEl("input", {"type": "checkbox", "attr": {"name": "rw-ask-nl"}});
+          showConf.addEventListener('change', (ev) => {
+            // @ts-ignore
+            this.settings.reimportShowConfirmation = !ev.target.checked;
+            this.saveSettings();
+          });
+          cancelBtn.onClickEvent(() => {
+            modal.close();
+          });
+          confirmBtn.onClickEvent(() => {
+            this.reimportFile(view.app.vault, activeFilePath);
+            modal.close();
+          });
+          modal.open();
+        } else {
+          this.reimportFile(view.app.vault, activeFilePath);
+        }
+      }
     });
     this.registerMarkdownPostProcessor((el, ctx) => {
       if (!ctx.sourcePath.startsWith(this.settings.readwiseDir)) {
@@ -483,18 +559,18 @@ export default class ReadwisePlugin extends Plugin {
   }
 
   getObsidianClientID() {
-    let obsidianClientId = window.localStorage.getItem('rw-ObsidianClientId')
+    let obsidianClientId = window.localStorage.getItem('rw-ObsidianClientId');
     if (obsidianClientId) {
-      return obsidianClientId
+      return obsidianClientId;
     } else {
-      obsidianClientId = Math.random().toString(36).substring(2, 15)
-      window.localStorage.setItem('rw-ObsidianClientId', obsidianClientId)
-      return obsidianClientId
+      obsidianClientId = Math.random().toString(36).substring(2, 15);
+      window.localStorage.setItem('rw-ObsidianClientId', obsidianClientId);
+      return obsidianClientId;
     }
   }
 
   async getUserAuthToken(button: HTMLElement, attempt = 0) {
-    let uuid = this.getObsidianClientID()
+    let uuid = this.getObsidianClientID();
 
     if (attempt === 0) {
       window.open(`${baseURL}/api_auth?token=${uuid}&service=obsidian`);
@@ -635,7 +711,7 @@ class ReadwiseSettingTab extends PluginSettingTab {
         .setDesc("If enabled, you can refresh individual items by deleting the file in Obsidian and initiating a resync")
         .addToggle((toggle) => {
             toggle.setValue(this.plugin.settings.refreshBooks);
-            toggle.onChange(async(val) => {
+            toggle.onChange(async (val) => {
               this.plugin.settings.refreshBooks = val;
               await this.plugin.saveSettings();
               if (val) {
