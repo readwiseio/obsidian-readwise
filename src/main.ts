@@ -60,7 +60,7 @@ const DEFAULT_SETTINGS: ReadwisePluginSettings = {
   lastSyncFailed: false,
   lastSavedStatusID: 0,
   currentSyncStatusID: 0,
-  refreshBooks: true,
+  refreshBooks: false,
   booksToRefresh: [],
   booksIDsMap: {},
   reimportShowConfirmation: true,
@@ -157,13 +157,16 @@ export default class ReadwisePlugin extends Plugin {
     }
   }
 
-  async requestArchive(buttonContext?: ButtonComponent, statusId?: number) {
+  async requestArchive(buttonContext?: ButtonComponent, statusId?: number, auto?: boolean) {
 
     const parentDeleted = !await this.app.vault.adapter.exists(this.settings.readwiseDir);
 
     let url = `${baseURL}/api/obsidian/init?parentPageDeleted=${parentDeleted}`;
     if (statusId) {
       url += `&statusID=${statusId}`;
+    }
+    if (auto) {
+      url += `&auto=${auto}`;
     }
     let response, data: ExportRequestResponse;
     try {
@@ -340,7 +343,7 @@ export default class ReadwisePlugin extends Plugin {
       // we got manual option
       return;
     }
-    this.scheduleInterval = window.setInterval(() => this.requestArchive(), milliseconds);
+    this.scheduleInterval = window.setInterval(() => this.requestArchive(null, null, true), milliseconds);
     this.registerInterval(this.scheduleInterval);
   }
 
@@ -541,7 +544,7 @@ export default class ReadwisePlugin extends Plugin {
     await this.configureSchedule();
     if (this.settings.token && this.settings.triggerOnLoad && !this.settings.isSyncing) {
       await this.saveSettings();
-      await this.requestArchive();
+      await this.requestArchive(null, null, true);
     }
   }
 
