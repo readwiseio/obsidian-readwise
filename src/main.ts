@@ -451,6 +451,8 @@ export default class ReadwisePlugin extends Plugin {
         await this.addBookToRefresh(bookId);
       }
       this.refreshBookExport();
+      delete this.settings.booksIDsMap[file.path];
+      this.saveSettings();
     });
     this.app.vault.on("rename", (file, oldPath) => {
       const bookId = this.settings.booksIDsMap[oldPath];
