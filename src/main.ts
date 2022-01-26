@@ -192,8 +192,8 @@ export default class ReadwisePlugin extends Plugin {
         this.notice("Syncing Readwise data");
         return this.getExportStatus(data.latest_id, buttonContext);
       } else {
-        this.handleSyncSuccess(buttonContext); // should we pass the export id to update lastSavedStatusID?
-        this.notice("Latest sync happened on different device...", false, 4, true);
+        this.handleSyncSuccess(buttonContext, "Synced", data.latest_id); // we pass the export id to update lastSavedStatusID
+        this.notice("Latest Readwise sync already happened on your other device. Data should be up to date", false, 4, true);
       }
     } else {
       console.log("Readwise Official plugin: bad response in requestArchive: ", response);
