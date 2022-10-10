@@ -278,7 +278,7 @@ export default class ReadwisePlugin extends Plugin {
           }
           // write the actual files
           const contents = await entry.getData(new zip.TextWriter());
-          let contentToSave = contents;
+          let contentToSave = contents.trim();
 
           let originalName = processedFileName;
           // extracting book ID from file name
@@ -291,7 +291,7 @@ export default class ReadwisePlugin extends Plugin {
           if (await this.fs.exists(originalName)) {
             // if the file already exists we need to append content to existing one
             const existingContent = await this.fs.read(originalName);
-            contentToSave = existingContent + contents;
+            contentToSave = existingContent + contents.trim();
           }
           await this.fs.write(originalName, contentToSave);
           await this.saveSettings();
