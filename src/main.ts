@@ -692,7 +692,8 @@ class ReadwiseSettingTab extends PluginSettingTab {
           dropdown.addOption("60", "Every 1 hour");
           dropdown.addOption((12 * 60).toString(), "Every 12 hours");
           dropdown.addOption((24 * 60).toString(), "Every 24 hours");
-
+          dropdown.addOption((7 * 24 * 60).toString(), "Every week");
+        
           // select the currently-saved option
           dropdown.setValue(this.plugin.settings.frequency);
 
