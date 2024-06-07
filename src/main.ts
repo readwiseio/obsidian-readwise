@@ -310,6 +310,7 @@ export default class ReadwisePlugin extends Plugin {
     await this.acknowledgeSyncCompleted(buttonContext);
     this.handleSyncSuccess(buttonContext, "Synced!", exportID);
     this.notice("Readwise sync completed", true, 1, true);
+    console.log("Readwise Official plugin: completed sync");
     // @ts-ignore
     if (this.app.isMobile) {
       this.notice("If you don't see all of your readwise files reload obsidian app", true,);
@@ -425,7 +426,7 @@ export default class ReadwisePlugin extends Plugin {
       this.saveSettings();
       this.requestArchive();
     }
-    console.log("started sync");
+    console.log("Readwise Official plugin: started sync");
   }
 
   async onload() {
