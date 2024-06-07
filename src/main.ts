@@ -3,8 +3,7 @@ import {
   ButtonComponent,
   DataAdapter,
   debounce,
-  Editor,
-  MarkdownView, Modal,
+  Modal,
   normalizePath,
   Notice,
   Plugin,
@@ -487,14 +486,14 @@ export default class ReadwisePlugin extends Plugin {
     this.addCommand({
       id: 'readwise-official-reimport-file',
       name: 'Delete and reimport this document',
-      editorCheckCallback: (checking: boolean, editor: Editor, view: MarkdownView) => {
-        const activeFilePath = view.file.path;
+      checkCallback: (checking: boolean) => {
+        const activeFilePath = this.app.workspace.getActiveFile().path;
         const isRWfile = activeFilePath in this.settings.booksIDsMap;
         if (checking) {
           return isRWfile;
         }
         if (this.settings.reimportShowConfirmation) {
-          const modal = new Modal(view.app);
+          const modal = new Modal(this.app);
           modal.contentEl.createEl(
             'p',
             {
@@ -516,12 +515,12 @@ export default class ReadwisePlugin extends Plugin {
             modal.close();
           });
           confirmBtn.onClickEvent(() => {
-            this.reimportFile(view.app.vault, activeFilePath);
+            this.reimportFile(this.app.vault, activeFilePath);
             modal.close();
           });
           modal.open();
         } else {
-          this.reimportFile(view.app.vault, activeFilePath);
+          this.reimportFile(this.app.vault, activeFilePath);
         }
       }
     });
