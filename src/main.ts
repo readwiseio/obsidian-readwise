@@ -302,6 +302,56 @@ export default class ReadwisePlugin extends Plugin {
     };
   }
 
+  /** helper to extract all book IDs from frontmatter in the readwiseDir ("base folder"),
+  perfectly matching them to the document they came from */
+  async extractBookIDs() {
+    console.log('Readwise Official plugin: extracting book IDs from frontmatter...');
+    const bookIDs: { [bookID: string]: string } = {};
+    if (!this.settings.frontmatterBookIdKey) {
+      console.log('Readwise Official plugin: no frontmatter key defined, skipping extraction');
+      return bookIDs;
+    }
+
+    const files = this.app.vault.getMarkdownFiles();
+    for (const file of files) {
+      if (file.path.startsWith(this.settings.readwiseDir)) {
+        const cache = this.app.metadataCache.getFileCache(file);
+        // skip if there's no cache
+        if (!cache) continue;
+
+        const frontmatter = cache.frontmatter;
+        // skip if there's no frontmatter
+        if (!frontmatter) continue;
+
+        const bookID = frontmatter[this.settings.frontmatterBookIdKey];
+        if (bookID) bookIDs[file.path] = bookID;
+      }
+    }
+
+    return bookIDs;
+  }
+
+  async getRWfiles() {
+    let jsonBookIDs = this.settings.booksIDsMap;
+    const frontmatterBookIDs = await this.extractBookIDs();
+
+    // merge the two objects, with frontmatterBookIDs taking precedence
+    return { ...jsonBookIDs, ...frontmatterBookIDs };
+  }
+
+  getFileBookId(file: TFile): string {
+    const frontmatterBookId = this.app.metadataCache.getFileCache(file).frontmatter?.[this.settings.frontmatterBookIdKey];
+    // type narrowing from any -> string
+    if (frontmatterBookId && typeof frontmatterBookId !== 'string') {
+      throw new Error(`Readwise Official plugin: bookId not a string`);
+    }
+
+    const jsonBookId = this.settings.booksIDsMap[file.path];
+
+    // prefer book id from frontmatter if it exists
+    return frontmatterBookId || jsonBookId;
+  }
+
   async downloadArchive(exportID: number, buttonContext: ButtonComponent): Promise<void> {
     let artifactURL = `${baseURL}/api/download_artifact/${exportID}`;
     if (exportID <= this.settings.lastSavedStatusID) {
@@ -461,8 +511,8 @@ export default class ReadwisePlugin extends Plugin {
     await this.saveSettings();
   }
 
-  reimportFile(vault: Vault, fileName: string) {
-    const bookId = this.settings.booksIDsMap[fileName];
+  reimportFile(vault: Vault, file: TFile) {
+    const bookId = this.getFileBookId(file);
     try {
       fetch(
         `${baseURL}/api/refresh_book_export`,
@@ -476,7 +526,7 @@ export default class ReadwisePlugin extends Plugin {
           let booksToRefresh = this.settings.booksToRefresh;
           this.settings.booksToRefresh = booksToRefresh.filter(n => ![bookId].includes(n));
           this.saveSettings();
-          vault.delete(vault.getAbstractFileByPath(fileName));
+          vault.delete(vault.getAbstractFileByPath(file.path));
           this.startSync();
         } else {
           this.notice("Failed to reimport. Please try again", true);
@@ -557,8 +607,8 @@ export default class ReadwisePlugin extends Plugin {
       id: 'readwise-official-reimport-file',
       name: 'Delete and reimport this document',
       checkCallback: (checking: boolean) => {
-        const activeFilePath = this.app.workspace.getActiveFile().path;
-        const isRWfile = activeFilePath in this.settings.booksIDsMap;
+        const activeFile = this.app.workspace.getActiveFile();
+        const isRWfile = !!this.getFileBookId(this.app.workspace.getActiveFile());
         if (checking) {
           return isRWfile;
         }
@@ -585,12 +635,12 @@ export default class ReadwisePlugin extends Plugin {
             modal.close();
           });
           confirmBtn.onClickEvent(() => {
-            this.reimportFile(this.app.vault, activeFilePath);
+            this.reimportFile(this.app.vault, activeFile);
             modal.close();
           });
           modal.open();
         } else {
-          this.reimportFile(this.app.vault, activeFilePath);
+          this.reimportFile(this.app.vault, activeFile);
         }
       }
     });
