@@ -683,6 +683,42 @@ export default class ReadwisePlugin extends Plugin {
         }
       }
     });
+    this.addCommand({
+      id: 'readwise-official-frontmatter-bookid-file',
+      name: 'Populate frontmatter with book ID in this document',
+      checkCallback: (checking: boolean) => {
+        const activeFile = this.app.workspace.getActiveFile();
+        // blank tab returns null for getActiveFile
+        if (!activeFile) return false;
+
+        const bookId = this.getFileBookId(activeFile);
+        const isRWfile = !!bookId;
+        const cache = this.app.metadataCache.getFileCache(activeFile);
+        const existingBookId = cache.frontmatter?.[this.settings.frontmatterBookIdKey];
+
+        if (checking) {
+          // don't show the command if the frontmatter key is not set
+          if (!this.settings.frontmatterBookIdKey) {
+            return false
+          }
+
+          // don't show the command if the file cache is not available
+          if (!cache) return false;
+
+          // don't show the command if the book ID is already set in the frontmatter
+          if (existingBookId) return false;
+
+          // finally,
+          // show the command if the file is a Readwise file
+          return isRWfile;
+        }
+
+        this.notice("Populating document frontmatter with book ID...", true);
+
+        // set the book ID in the frontmatter
+        this.writeBookIdToFrontmatter(activeFile, bookId);
+      }
+    });
     this.registerMarkdownPostProcessor((el, ctx) => {
       if (!ctx.sourcePath.startsWith(this.settings.readwiseDir)) {
         return;
