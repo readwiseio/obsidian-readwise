@@ -9,6 +9,7 @@ import {
   Plugin,
   PluginSettingTab,
   Setting,
+  TAbstractFile,
   TFile,
   Vault
 } from 'obsidian';
@@ -18,6 +19,11 @@ import {StatusBar} from "./status";
 
 // the process.env variable will be replaced by its target value in the output main.js file
 const baseURL = process.env.READWISE_SERVER_URL || "https://readwise.io";
+
+/** Type guard because TAbstractFile can be TFile or TFolder */
+function isTFile(file: TAbstractFile): file is TFile {
+  return file instanceof TFile;
+}
 
 interface ReadwiseAuthResponse {
   userAccessToken: string;
@@ -117,7 +123,7 @@ class AdvancedModal extends Modal {
           for (const file of readwiseExports) {
             console.log('Readwise Official plugin: checking file for frontmatter', file.path);
 
-            const bookId = this.plugin.settings.booksIDsMap[file.path];
+            const bookId = this.plugin.getFileBookId(file);
             if (!bookId) continue;
 
             await this.plugin.writeBookIdToFrontmatter(file, bookId);
@@ -249,13 +255,16 @@ export default class ReadwisePlugin extends Plugin {
     }
     if (response && response.ok) {
       data = await response.json();
+
       if (data.latest_id <= this.settings.lastSavedStatusID) {
         this.handleSyncSuccess(buttonContext);
         this.notice("Readwise data is already up to date", false, 4, true);
         return;
       }
+
       this.settings.currentSyncStatusID = data.latest_id;
       await this.saveSettings();
+
       if (response.status === 201) {
         this.notice("Syncing Readwise data");
         return this.getExportStatus(data.latest_id, buttonContext);
@@ -300,6 +309,60 @@ export default class ReadwisePlugin extends Plugin {
       'AUTHORIZATION': `Token ${this.settings.token}`,
       'Obsidian-Client': `${this.getObsidianClientID()}`,
     };
+  }
+
+  /** helper to extract all book IDs from frontmatter in the readwiseDir ("base folder"),
+  perfectly matching them to the document they came from */
+  async extractBookIDs() {
+    console.log('Readwise Official plugin: extracting book IDs from frontmatter...');
+    const bookIDs: { [bookID: string]: string } = {};
+    if (!this.settings.frontmatterBookIdKey) {
+      console.log('Readwise Official plugin: no frontmatter key defined, skipping extraction');
+      return bookIDs;
+    }
+
+    const files = this.app.vault.getMarkdownFiles();
+    for (const file of files) {
+      if (file.path.startsWith(this.settings.readwiseDir)) {
+        const cache = this.app.metadataCache.getFileCache(file);
+        // skip if there's no cache
+        if (!cache) continue;
+
+        const frontmatter = cache.frontmatter;
+        // skip if there's no frontmatter
+        if (!frontmatter) continue;
+
+        const bookID = frontmatter[this.settings.frontmatterBookIdKey];
+        if (bookID) bookIDs[file.path] = bookID;
+      }
+    }
+
+    return bookIDs;
+  }
+
+  async getRWfiles() {
+    let jsonBookIDs = this.settings.booksIDsMap;
+    const frontmatterBookIDs = await this.extractBookIDs();
+
+    // merge the two objects, with frontmatterBookIDs taking precedence
+    return { ...jsonBookIDs, ...frontmatterBookIDs };
+  }
+
+  /** gets the book ID of a provided file.
+  * prefers book ID from frontmatter if it exists,
+  * otherwise uses the the ID found in data.json (booksIDsMap)
+  */
+  getFileBookId(file: TFile): string {
+    const frontmatterBookId = this.app.metadataCache.getFileCache(file).frontmatter?.[this.settings.frontmatterBookIdKey];
+    // type narrowing from any -> string
+    if (frontmatterBookId && typeof frontmatterBookId !== 'string') {
+      throw new Error(`Readwise Official plugin: bookId not a string`);
+    }
+
+    const jsonBookId = this.settings.booksIDsMap[file.path];
+
+    // prefer book id from frontmatter if it exists
+    return frontmatterBookId || jsonBookId;
   }
 
   async downloadArchive(exportID: number, buttonContext: ButtonComponent): Promise<void> {
@@ -363,6 +426,7 @@ export default class ReadwisePlugin extends Plugin {
           }
           await this.fs.write(originalName, contentToSave);
           this.app.metadataCache.trigger('readwise:write');
+
           await this.saveSettings();
         } catch (e) {
           console.log(`Readwise Official plugin: error writing ${processedFileName}:`, e);
@@ -462,8 +526,8 @@ export default class ReadwisePlugin extends Plugin {
     await this.saveSettings();
   }
 
-  reimportFile(vault: Vault, fileName: string) {
-    const bookId = this.settings.booksIDsMap[fileName];
+  reimportFile(vault: Vault, file: TFile) {
+    const bookId = this.getFileBookId(file);
     try {
       fetch(
         `${baseURL}/api/refresh_book_export`,
@@ -477,7 +541,7 @@ export default class ReadwisePlugin extends Plugin {
           let booksToRefresh = this.settings.booksToRefresh;
           this.settings.booksToRefresh = booksToRefresh.filter(n => ![bookId].includes(n));
           this.saveSettings();
-          vault.delete(vault.getAbstractFileByPath(fileName)).then(() => {
+          vault.delete(vault.getAbstractFileByPath(file.path)).then(() => {
             this.startSync();
             this.app.metadataCache.trigger('readwise:write');
           });
@@ -529,10 +593,18 @@ export default class ReadwisePlugin extends Plugin {
     });
 
     this.app.vault.on("rename", (file, oldPath) => {
-      const bookId = this.settings.booksIDsMap[oldPath];
+      if (!isTFile(file)) {
+        throw new Error(`Readwise Official plugin: file is not a TFile`);
+      }
+
+      // prefer book ID from frontmatter if it exists
+      const bookId = this.getFileBookId(file) || this.settings.booksIDsMap[oldPath];
+      // the logic in this is ^ kinda awkward... could pass oldPath to getFileBookId as a sort of override?
+
       if (!bookId) {
         return;
       }
+
       this.settings.booksIDsMap[file.path] = bookId;
       delete this.settings.booksIDsMap[oldPath];
       this.saveSettings();
@@ -569,14 +641,17 @@ export default class ReadwisePlugin extends Plugin {
       id: 'readwise-official-reimport-file',
       name: 'Delete and reimport this document',
       checkCallback: (checking: boolean) => {
-        const activeFilePath = this.app.workspace.getActiveFile().path;
-        const isRWfile = activeFilePath in this.settings.booksIDsMap;
+        const activeFile = this.app.workspace.getActiveFile();
+        // blank tab returns null for getActiveFile
+        if (!activeFile) return false;
+
         if (checking) {
+          const isRWfile = !!this.getFileBookId(this.app.workspace.getActiveFile());
           return isRWfile;
         }
+
         if (this.settings.reimportShowConfirmation) {
           const modal = new Modal(this.app);
-          modal.titleEl.setText("Delete and reimport this document?");
           modal.contentEl.createEl(
             'p',
             {
@@ -599,12 +674,12 @@ export default class ReadwisePlugin extends Plugin {
             modal.close();
           });
           confirmBtn.onClickEvent(() => {
-            this.reimportFile(this.app.vault, activeFilePath);
+            this.reimportFile(this.app.vault, activeFile);
             modal.close();
           });
           modal.open();
         } else {
-          this.reimportFile(this.app.vault, activeFilePath);
+          this.reimportFile(this.app.vault, activeFile);
         }
       }
     });
