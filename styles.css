@@ -14,7 +14,7 @@
 }
 
 .rw-info-container {
-    margin-right: 10px;
+    margin-inline-end: 10px;
 }
 
 .rw-info {
@@ -41,11 +41,18 @@ img[alt=rw-book-cover] {
 .rw-modal-btns {
     display: flex;
     justify-content: flex-end;
+    gap: 0.5rem;
 }
 
 .rw-modal-confirmation {
-    margin-top: 1em;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    justify-content: flex-end;
+    margin-block-start: 1em;
     font-size: smaller;
-    text-align: right;
-    padding-right: 12px;
+}
+
+.rw-modal-warning-text {
+    margin-block-start: 0;
 }
