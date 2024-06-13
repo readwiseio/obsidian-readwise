@@ -495,18 +495,20 @@ export default class ReadwisePlugin extends Plugin {
         }
         if (this.settings.reimportShowConfirmation) {
           const modal = new Modal(this.app);
+          modal.titleEl.setText("Delete and reimport this document?");
           modal.contentEl.createEl(
             'p',
             {
-              'text': 'Warning: Proceeding will delete this file entirely (including any changes you made) ' +
-                'and then reimport a new copy of your highlights from Readwise.'
+              text: 'Warning: Proceeding will delete this file entirely (including any changes you made) ' +
+                'and then reimport a new copy of your highlights from Readwise.',
+              cls: 'rw-modal-warning-text',
             });
           const buttonsContainer = modal.contentEl.createEl('div', {"cls": "rw-modal-btns"});
           const cancelBtn = buttonsContainer.createEl("button", {"text": "Cancel"});
           const confirmBtn = buttonsContainer.createEl("button", {"text": "Proceed", 'cls': 'mod-warning'});
           const showConfContainer = modal.contentEl.createEl('div', {'cls': 'rw-modal-confirmation'});
           showConfContainer.createEl("label", {"attr": {"for": "rw-ask-nl"}, "text": "Don't ask me in the future"});
-          const showConf = showConfContainer.createEl("input", {"type": "checkbox", "attr": {"name": "rw-ask-nl"}});
+          const showConf = showConfContainer.createEl("input", {"type": "checkbox", "attr": {"name": "rw-ask-nl", "id": "rw-ask-nl"}});
           showConf.addEventListener('change', (ev) => {
             // @ts-ignore
             this.settings.reimportShowConfirmation = !ev.target.checked;
