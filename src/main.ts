@@ -360,28 +360,28 @@ export default class ReadwisePlugin extends Plugin {
       return;
     }
     try {
-      fetch(
+      const response = await fetch(
         `${baseURL}/api/refresh_book_export`,
         {
           headers: {...this.getAuthHeaders(), 'Content-Type': 'application/json'},
           method: "POST",
           body: JSON.stringify({exportTarget: 'obsidian', books: bookIds})
         }
-      ).then(response => {
-        if (response && response.ok) {
-          let booksToRefresh = this.settings.booksToRefresh;
-          this.settings.booksToRefresh = booksToRefresh.filter(n => !bookIds.includes(n));
-          this.saveSettings();
-          return;
-        } else {
-          console.log(`Readwise Official plugin: saving book id ${bookIds} to refresh later`);
-          let booksToRefresh = this.settings.booksToRefresh;
-          booksToRefresh.concat(bookIds);
-          this.settings.booksToRefresh = booksToRefresh;
-          this.saveSettings();
-          return;
-        }
-      });
+      );
+
+      if (response && response.ok) {
+        let booksToRefresh = this.settings.booksToRefresh;
+        this.settings.booksToRefresh = booksToRefresh.filter(n => !bookIds.includes(n));
+        await this.saveSettings();
+        return;
+      } else {
+        console.log(`Readwise Official plugin: saving book id ${bookIds} to refresh later`);
+        let booksToRefresh = this.settings.booksToRefresh;
+        booksToRefresh.concat(bookIds);
+        this.settings.booksToRefresh = booksToRefresh;
+        await this.saveSettings();
+        return;
+      }
     } catch (e) {
       console.log("Readwise Official plugin: fetch failed in refreshBookExport: ", e);
     }
