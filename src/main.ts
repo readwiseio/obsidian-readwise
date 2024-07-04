@@ -2,7 +2,6 @@ import {
   App,
   ButtonComponent,
   DataAdapter,
-  debounce,
   Modal,
   normalizePath,
   Notice,
@@ -156,6 +155,7 @@ export default class ReadwisePlugin extends Plugin {
     }
   }
 
+  /** Requests a new archive export from Readwise. Refreshes book exports along the way. */
   async requestArchive(buttonContext?: ButtonComponent, statusId?: number, auto?: boolean) {
 
     const parentDeleted = !await this.app.vault.adapter.exists(this.settings.readwiseDir);
@@ -169,6 +169,8 @@ export default class ReadwisePlugin extends Plugin {
     }
     let response, data: ExportRequestResponse;
     try {
+      await this.refreshBookExport();
+
       response = await fetch(
         url,
         {
@@ -352,7 +354,7 @@ export default class ReadwisePlugin extends Plugin {
     this.registerInterval(this.scheduleInterval);
   }
 
-  refreshBookExport(bookIds?: Array<string>) {
+  async refreshBookExport(bookIds?: Array<string>) {
     bookIds = bookIds || this.settings.booksToRefresh;
     if (!bookIds.length || !this.settings.refreshBooks) {
       return;
@@ -439,22 +441,14 @@ export default class ReadwisePlugin extends Plugin {
         window.setInterval(() => this.statusBar.display(), 1000)
       );
     }
-    await this.loadSettings();
-    this.refreshBookExport = debounce(
-      this.refreshBookExport.bind(this),
-      800,
-      true
-    );
 
-    this.refreshBookExport(this.settings.booksToRefresh);
+    await this.refreshBookExport(this.settings.booksToRefresh);
+
     this.app.vault.on("delete", async (file) => {
       const bookId = this.settings.booksIDsMap[file.path];
-      if (bookId) {
-        await this.addBookToRefresh(bookId);
-      }
-      this.refreshBookExport();
+      await this.addBookToRefresh(bookId);
       delete this.settings.booksIDsMap[file.path];
-      this.saveSettings();
+      await this.saveSettings();
     });
     this.app.vault.on("rename", (file, oldPath) => {
       const bookId = this.settings.booksIDsMap[oldPath];
@@ -657,8 +651,7 @@ class ReadwiseSettingTab extends PluginSettingTab {
               } else {
                 this.plugin.clearInfoStatus(containerEl);
                 this.plugin.settings.isSyncing = true;
-                await this.plugin.saveData(this.plugin.settings);
-                button.setButtonText("Syncing...");
+                await this.plugin.saveSettings();
                 await this.plugin.requestArchive(button);
               }
 
@@ -730,7 +723,7 @@ class ReadwiseSettingTab extends PluginSettingTab {
               this.plugin.settings.refreshBooks = val;
               await this.plugin.saveSettings();
               if (val) {
-                this.plugin.refreshBookExport();
+                await this.plugin.refreshBookExport();
               }
             });
           }
