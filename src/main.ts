@@ -395,27 +395,13 @@ export default class ReadwisePlugin extends Plugin {
   }
 
   async reimportFile(vault: Vault, fileName: string) {
-    const bookId = this.settings.booksIDsMap[fileName];
     try {
-      this.notice("Reimporting file...", true);
-      const response = await fetch(
-        `${baseURL}/api/refresh_book_export`,
-        {
-          headers: {...this.getAuthHeaders(), 'Content-Type': 'application/json'},
-          method: "POST",
-          body: JSON.stringify({exportTarget: 'obsidian', books: [bookId]})
-        }
-      );
+      this.notice("Deleting and reimporting file...", true);
 
-      if (response && response.ok) {
-        let booksToRefresh = this.settings.booksToRefresh;
-        this.settings.booksToRefresh = booksToRefresh.filter(n => ![bookId].includes(n));
-        await this.saveSettings();
-        await vault.delete(vault.getAbstractFileByPath(fileName));
-        await this.startSync();
-      } else {
-        this.notice("Failed to reimport. Please try again", true);
-      }
+      // the .on("delete") listener will add this file to booksToRefresh
+      await vault.delete(vault.getAbstractFileByPath(fileName));
+      // sync will grab missing booksToRefresh
+      await this.startSync();
     } catch (e) {
       console.log("Readwise Official plugin: fetch failed in Reimport current file: ", e);
     }
