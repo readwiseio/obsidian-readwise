@@ -9,6 +9,8 @@ import {
   Plugin,
   PluginSettingTab,
   Setting,
+  TAbstractFile,
+  TFile,
   Vault
 } from 'obsidian';
 import * as zip from "@zip.js/zip.js";
@@ -17,6 +19,11 @@ import {StatusBar} from "./status";
 
 // the process.env variable will be replaced by its target value in the output main.js file
 const baseURL = process.env.READWISE_SERVER_URL || "https://readwise.io";
+
+/** Type guard because TAbstractFile can be TFile or TFolder */
+function isTFile(file: TAbstractFile): file is TFile {
+  return file instanceof TFile;
+}
 
 interface ReadwiseAuthResponse {
   userAccessToken: string;
@@ -47,6 +54,7 @@ interface ReadwisePluginSettings {
   booksToRefresh: Array<string>;
   booksIDsMap: { [key: string]: string; };
   reimportShowConfirmation: boolean;
+  frontmatterBookIdKey?: string;
 }
 
 // define our initial settings
@@ -64,6 +72,73 @@ const DEFAULT_SETTINGS: ReadwisePluginSettings = {
   booksIDsMap: {},
   reimportShowConfirmation: true,
 };
+
+class AdvancedModal extends Modal {
+  plugin: ReadwisePlugin;
+
+  constructor(app: App, plugin: ReadwisePlugin) {
+    super(app);
+    this.plugin = plugin;
+  }
+
+  onOpen() {
+    const { titleEl, contentEl } = this;
+
+    titleEl.setText('Advanced settings');
+
+    // add new setting that allows text input
+    new Setting(contentEl)
+      .setName('Book ID frontmatter key')
+      .setDesc('The frontmatter key used to store the Readwise book_id. If set, will be preferred for syncs.')
+      .addText(text => text
+        .setPlaceholder('readwise-book-id')
+        .setValue(this.plugin.settings.frontmatterBookIdKey)
+        .onChange(async value => {
+          console.log('Readwise Official plugin: setting frontmatter book ID key to', value);
+          this.plugin.settings.frontmatterBookIdKey = value;
+          this.plugin.saveSettings();
+
+          // enable/disable populate button depending on whether the key is set
+          const populateButton = contentEl.querySelector('.rw-setting-populate-book-id');
+          if (populateButton instanceof HTMLButtonElement) {
+            populateButton.disabled = !value;
+          }
+        }));
+
+    // button to populate the frontmatter with using
+    // the frontmatterBookIdKey and matching it
+    // with whatever's saved in booksIDsMap
+    return new Setting(contentEl)
+      .setName('Populate frontmatter key')
+      .setDesc('If the book ID frontmatter key is configured above, this will populate the frontmatter key setting with the first key found in the booksIDsMap. This will not overwrite existing keys.')
+      .addButton(button => button
+        .setButtonText('Populate')
+        .setClass('rw-setting-populate-book-id')
+        .setDisabled(!this.plugin.settings.frontmatterBookIdKey)
+        .onClick(async () => {
+          this.plugin.notice("Populating frontmatter with book IDs...", true);
+          console.log(`Readwise Official plugin: populating frontmatter key ${this.plugin.settings.frontmatterBookIdKey} with matching value from booksIDsMap...`);
+
+          const readwiseExports = this.plugin.app.vault.getMarkdownFiles();
+          for (const file of readwiseExports) {
+            console.log('Readwise Official plugin: checking file for frontmatter', file.path);
+
+            const bookId = this.plugin.getFileBookId(file);
+            if (!bookId) continue;
+
+            await this.plugin.writeBookIdToFrontmatter(file, bookId);
+          }
+
+          this.plugin.notice("Frontmatter populated with book IDs", true);
+        })
+      );
+  }
+
+  onClose() {
+    const { contentEl } = this;
+    contentEl.empty();
+  }
+}
 
 export default class ReadwisePlugin extends Plugin {
   settings: ReadwisePluginSettings;
@@ -180,13 +255,16 @@ export default class ReadwisePlugin extends Plugin {
     }
     if (response && response.ok) {
       data = await response.json();
+
       if (data.latest_id <= this.settings.lastSavedStatusID) {
         this.handleSyncSuccess(buttonContext);
         this.notice("Readwise data is already up to date", false, 4, true);
         return;
       }
+
       this.settings.currentSyncStatusID = data.latest_id;
       await this.saveSettings();
+
       if (response.status === 201) {
         this.notice("Syncing Readwise data");
         return this.getExportStatus(data.latest_id, buttonContext);
@@ -231,6 +309,60 @@ export default class ReadwisePlugin extends Plugin {
       'AUTHORIZATION': `Token ${this.settings.token}`,
       'Obsidian-Client': `${this.getObsidianClientID()}`,
     };
+  }
+
+  /** helper to extract all book IDs from frontmatter in the readwiseDir ("base folder"),
+  perfectly matching them to the document they came from */
+  async extractBookIDs() {
+    console.log('Readwise Official plugin: extracting book IDs from frontmatter...');
+    const bookIDs: { [bookID: string]: string } = {};
+    if (!this.settings.frontmatterBookIdKey) {
+      console.log('Readwise Official plugin: no frontmatter key defined, skipping extraction');
+      return bookIDs;
+    }
+
+    const files = this.app.vault.getMarkdownFiles();
+    for (const file of files) {
+      if (file.path.startsWith(this.settings.readwiseDir)) {
+        const cache = this.app.metadataCache.getFileCache(file);
+        // skip if there's no cache
+        if (!cache) continue;
+
+        const frontmatter = cache.frontmatter;
+        // skip if there's no frontmatter
+        if (!frontmatter) continue;
+
+        const bookID = frontmatter[this.settings.frontmatterBookIdKey];
+        if (bookID) bookIDs[file.path] = bookID;
+      }
+    }
+
+    return bookIDs;
+  }
+
+  async getRWfiles() {
+    let jsonBookIDs = this.settings.booksIDsMap;
+    const frontmatterBookIDs = await this.extractBookIDs();
+
+    // merge the two objects, with frontmatterBookIDs taking precedence
+    return { ...jsonBookIDs, ...frontmatterBookIDs };
+  }
+
+  /** gets the book ID of a provided file.
+  * prefers book ID from frontmatter if it exists,
+  * otherwise uses the the ID found in data.json (booksIDsMap)
+  */
+  getFileBookId(file: TFile): string {
+    const frontmatterBookId = this.app.metadataCache.getFileCache(file).frontmatter?.[this.settings.frontmatterBookIdKey];
+    // type narrowing from any -> string
+    if (frontmatterBookId && typeof frontmatterBookId !== 'string') {
+      throw new Error(`Readwise Official plugin: bookId not a string`);
+    }
+
+    const jsonBookId = this.settings.booksIDsMap[file.path];
+
+    // prefer book id from frontmatter if it exists
+    return frontmatterBookId || jsonBookId;
   }
 
   async downloadArchive(exportID: number, buttonContext: ButtonComponent): Promise<void> {
@@ -293,6 +425,8 @@ export default class ReadwisePlugin extends Plugin {
             contentToSave = existingContent + contents;
           }
           await this.fs.write(originalName, contentToSave);
+          this.app.metadataCache.trigger('readwise:write');
+
           await this.saveSettings();
         } catch (e) {
           console.log(`Readwise Official plugin: error writing ${processedFileName}:`, e);
@@ -392,8 +526,8 @@ export default class ReadwisePlugin extends Plugin {
     await this.saveSettings();
   }
 
-  reimportFile(vault: Vault, fileName: string) {
-    const bookId = this.settings.booksIDsMap[fileName];
+  reimportFile(vault: Vault, file: TFile) {
+    const bookId = this.getFileBookId(file);
     try {
       fetch(
         `${baseURL}/api/refresh_book_export`,
@@ -407,8 +541,10 @@ export default class ReadwisePlugin extends Plugin {
           let booksToRefresh = this.settings.booksToRefresh;
           this.settings.booksToRefresh = booksToRefresh.filter(n => ![bookId].includes(n));
           this.saveSettings();
-          vault.delete(vault.getAbstractFileByPath(fileName));
-          this.startSync();
+          vault.delete(vault.getAbstractFileByPath(file.path)).then(() => {
+            this.startSync();
+            this.app.metadataCache.trigger('readwise:write');
+          });
         } else {
           this.notice("Failed to reimport. Please try again", true);
         }
@@ -445,6 +581,7 @@ export default class ReadwisePlugin extends Plugin {
     );
 
     this.refreshBookExport(this.settings.booksToRefresh);
+
     this.app.vault.on("delete", async (file) => {
       const bookId = this.settings.booksIDsMap[file.path];
       if (bookId) {
@@ -454,15 +591,31 @@ export default class ReadwisePlugin extends Plugin {
       delete this.settings.booksIDsMap[file.path];
       this.saveSettings();
     });
+
     this.app.vault.on("rename", (file, oldPath) => {
-      const bookId = this.settings.booksIDsMap[oldPath];
+      if (!isTFile(file)) {
+        throw new Error(`Readwise Official plugin: file is not a TFile`);
+      }
+
+      // prefer book ID from frontmatter if it exists
+      const bookId = this.getFileBookId(file) || this.settings.booksIDsMap[oldPath];
+      // the logic in this is ^ kinda awkward... could pass oldPath to getFileBookId as a sort of override?
+
       if (!bookId) {
         return;
       }
+
       this.settings.booksIDsMap[file.path] = bookId;
       delete this.settings.booksIDsMap[oldPath];
       this.saveSettings();
     });
+
+    this.app.metadataCache.on('changed', async (file) => {
+      if (file.path.startsWith(this.settings.readwiseDir)) {
+        await this.writeBookIdToFrontmatter(file, this.settings.booksIDsMap[file.path]);
+      }
+    });
+
     if (this.settings.isSyncing) {
       if (this.settings.currentSyncStatusID) {
         await this.getExportStatus();
@@ -488,14 +641,17 @@ export default class ReadwisePlugin extends Plugin {
       id: 'readwise-official-reimport-file',
       name: 'Delete and reimport this document',
       checkCallback: (checking: boolean) => {
-        const activeFilePath = this.app.workspace.getActiveFile().path;
-        const isRWfile = activeFilePath in this.settings.booksIDsMap;
+        const activeFile = this.app.workspace.getActiveFile();
+        // blank tab returns null for getActiveFile
+        if (!activeFile) return false;
+
         if (checking) {
+          const isRWfile = !!this.getFileBookId(this.app.workspace.getActiveFile());
           return isRWfile;
         }
+
         if (this.settings.reimportShowConfirmation) {
           const modal = new Modal(this.app);
-          modal.titleEl.setText("Delete and reimport this document?");
           modal.contentEl.createEl(
             'p',
             {
@@ -518,13 +674,49 @@ export default class ReadwisePlugin extends Plugin {
             modal.close();
           });
           confirmBtn.onClickEvent(() => {
-            this.reimportFile(this.app.vault, activeFilePath);
+            this.reimportFile(this.app.vault, activeFile);
             modal.close();
           });
           modal.open();
         } else {
-          this.reimportFile(this.app.vault, activeFilePath);
+          this.reimportFile(this.app.vault, activeFile);
         }
+      }
+    });
+    this.addCommand({
+      id: 'readwise-official-frontmatter-bookid-file',
+      name: 'Populate frontmatter with book ID in this document',
+      checkCallback: (checking: boolean) => {
+        const activeFile = this.app.workspace.getActiveFile();
+        // blank tab returns null for getActiveFile
+        if (!activeFile) return false;
+
+        const bookId = this.getFileBookId(activeFile);
+        const isRWfile = !!bookId;
+        const cache = this.app.metadataCache.getFileCache(activeFile);
+        const existingBookId = cache.frontmatter?.[this.settings.frontmatterBookIdKey];
+
+        if (checking) {
+          // don't show the command if the frontmatter key is not set
+          if (!this.settings.frontmatterBookIdKey) {
+            return false
+          }
+
+          // don't show the command if the file cache is not available
+          if (!cache) return false;
+
+          // don't show the command if the book ID is already set in the frontmatter
+          if (existingBookId) return false;
+
+          // finally,
+          // show the command if the file is a Readwise file
+          return isRWfile;
+        }
+
+        this.notice("Populating document frontmatter with book ID...", true);
+
+        // set the book ID in the frontmatter
+        this.writeBookIdToFrontmatter(activeFile, bookId);
       }
     });
     this.registerMarkdownPostProcessor((el, ctx) => {
@@ -616,6 +808,27 @@ export default class ReadwisePlugin extends Plugin {
     }
     await this.saveSettings();
     return true;
+  }
+
+  async writeBookIdToFrontmatter(file: TFile, bookId: string) {
+    console.log('Readwise Official plugin: checking file for frontmatter', file.path);
+
+    if (!this.settings.frontmatterBookIdKey) return;
+
+    const cache = this.app.metadataCache.getFileCache(file);
+    if (!cache) return;
+
+    const frontmatter = cache.frontmatter;
+    if (!frontmatter) return;
+
+    // don't overwrite existing book ID in frontmatter
+    const existingBookId = frontmatter[this.settings.frontmatterBookIdKey];
+    if (existingBookId) return;
+
+    await this.app.fileManager.processFrontMatter(file, frontmatter => {
+      console.log(`Readwise Official plugin: setting frontmatter key for "${file.path}" to ${bookId}`);
+      frontmatter[this.settings.frontmatterBookIdKey] = bookId;
+    });
   }
 }
 
@@ -733,6 +946,17 @@ class ReadwiseSettingTab extends PluginSettingTab {
             });
           }
         );
+
+        new Setting(containerEl)
+          .setName('Advanced settings')
+          .setDesc('Customize additional settings for the Readwise plugin')
+          .addButton(button => {
+            button
+              .setButtonText('Open')
+              .onClick(() => {
+                new AdvancedModal(this.app, this.plugin).open();
+              });
+          });
 
       if (this.plugin.settings.lastSyncFailed) {
         this.plugin.showInfoStatus(containerEl.find(".rw-setting-sync .rw-info-container").parentElement, "Last sync failed", "rw-error");
