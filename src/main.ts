@@ -490,8 +490,8 @@ export default class ReadwisePlugin extends Plugin {
       id: 'readwise-official-reimport-file',
       name: 'Delete and reimport this document',
       checkCallback: (checking: boolean) => {
-        const activeFilePath = this.app.workspace.getActiveFile().path;
-        const isRWfile = activeFilePath in this.settings.booksIDsMap;
+        const activeFilePath = this.app.workspace.getActiveFile()?.path;
+        const isRWfile = activeFilePath && activeFilePath in this.settings.booksIDsMap;
         if (checking) {
           return isRWfile;
         }
