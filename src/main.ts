@@ -430,6 +430,8 @@ export default class ReadwisePlugin extends Plugin {
   }
 
   async onload() {
+    await this.loadSettings();
+
     // @ts-ignore
     if (!this.app.isMobile) {
       this.statusBar = new StatusBar(this.addStatusBarItem());
