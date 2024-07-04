@@ -394,39 +394,40 @@ export default class ReadwisePlugin extends Plugin {
     await this.saveSettings();
   }
 
-  reimportFile(vault: Vault, fileName: string) {
+  async reimportFile(vault: Vault, fileName: string) {
     const bookId = this.settings.booksIDsMap[fileName];
     try {
-      fetch(
+      this.notice("Reimporting file...", true);
+      const response = await fetch(
         `${baseURL}/api/refresh_book_export`,
         {
           headers: {...this.getAuthHeaders(), 'Content-Type': 'application/json'},
           method: "POST",
           body: JSON.stringify({exportTarget: 'obsidian', books: [bookId]})
         }
-      ).then(response => {
-        if (response && response.ok) {
-          let booksToRefresh = this.settings.booksToRefresh;
-          this.settings.booksToRefresh = booksToRefresh.filter(n => ![bookId].includes(n));
-          this.saveSettings();
-          vault.delete(vault.getAbstractFileByPath(fileName));
-          this.startSync();
-        } else {
-          this.notice("Failed to reimport. Please try again", true);
-        }
-      });
+      );
+
+      if (response && response.ok) {
+        let booksToRefresh = this.settings.booksToRefresh;
+        this.settings.booksToRefresh = booksToRefresh.filter(n => ![bookId].includes(n));
+        await this.saveSettings();
+        await vault.delete(vault.getAbstractFileByPath(fileName));
+        await this.startSync();
+      } else {
+        this.notice("Failed to reimport. Please try again", true);
+      }
     } catch (e) {
       console.log("Readwise Official plugin: fetch failed in Reimport current file: ", e);
     }
   }
 
-  startSync() {
+  async startSync() {
     if (this.settings.isSyncing) {
       this.notice("Readwise sync already in progress", true);
     } else {
       this.settings.isSyncing = true;
-      this.saveSettings();
-      this.requestArchive();
+      await this.saveSettings();
+      await this.requestArchive();
     }
     console.log("Readwise Official plugin: started sync");
   }
