@@ -358,6 +358,18 @@ export default class ReadwisePlugin extends Plugin {
   async refreshBookExport(bookIds?: Array<string>) {
     const targetBookIds = bookIds || this.settings.booksToRefresh;
 
+    // add potentially-missing books to booksToRefresh (TODO - prob a lil inefficient? 🤷)
+    const knownFilesPaths = Object.keys(this.settings.booksIDsMap);
+    if (this.settings.refreshBooks) {
+      for (const knownFilePath of knownFilesPaths) {
+        const file = this.app.vault.getAbstractFileByPath(knownFilePath);
+        if (!file) {
+          const bookId = this.settings.booksIDsMap[knownFilePath];
+          targetBookIds.push(bookId);
+        }
+      }
+    }
+
     if (!targetBookIds.length) {
       return;
     }
