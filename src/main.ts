@@ -156,7 +156,7 @@ export default class ReadwisePlugin extends Plugin {
     }
   }
 
-  /** Requests a new archive export from Readwise. Refreshes book exports along the way. */
+  /** Requests a new archive export from Readwise. */
   async requestArchive(buttonContext?: ButtonComponent, statusId?: number, auto?: boolean) {
 
     const parentDeleted = !await this.app.vault.adapter.exists(this.settings.readwiseDir);
@@ -356,6 +356,8 @@ export default class ReadwisePlugin extends Plugin {
 
   /** Initiates a sync, or queues refresh for later if queue fails */
   async refreshBookExport(bookIds?: Array<string>) {
+    if (!this.settings.token) return;
+
     const targetBookIds = bookIds || this.settings.booksToRefresh;
 
     // add potentially-missing books to booksToRefresh (TODO - prob a lil inefficient? 🤷)
@@ -370,9 +372,18 @@ export default class ReadwisePlugin extends Plugin {
       }
     }
 
-    if (!targetBookIds.length) {
+    const hasNeverSynced = !Object.keys(this.settings.booksIDsMap).length;
+    if (hasNeverSynced) {
+      this.notice("Preparing initial Readwise sync...", true);
+      await this.startSync();
       return;
     }
+
+    if (!targetBookIds.length) {
+      this.notice("nothing to refresh", false);
+      return;
+    }
+
     try {
       const response = await fetch(
         `${baseURL}/api/refresh_book_export`,
@@ -444,7 +455,12 @@ export default class ReadwisePlugin extends Plugin {
       );
     }
 
-    await this.refreshBookExport(this.settings.booksToRefresh);
+    // ensure workspace is loaded (especially cache) before requesting a refresh
+    this.app.workspace.onLayoutReady(async () => {
+      if (this.settings.triggerOnLoad) {
+        await this.refreshBookExport(this.settings.booksToRefresh);
+      }
+    });
 
     this.app.vault.on("delete", async (file) => {
       const bookId = this.settings.booksIDsMap[file.path];
@@ -552,10 +568,6 @@ export default class ReadwisePlugin extends Plugin {
     });
     this.addSettingTab(new ReadwiseSettingTab(this.app, this));
     await this.configureSchedule();
-    if (this.settings.token && this.settings.triggerOnLoad && !this.settings.isSyncing) {
-      await this.saveSettings();
-      await this.requestArchive(null, null, true);
-    }
   }
 
   onunload() {
@@ -605,7 +617,9 @@ export default class ReadwisePlugin extends Plugin {
       return;
     }
     if (data.userAccessToken) {
+      console.log("Readwise Official plugin: successfully authenticated with Readwise");
       this.settings.token = data.userAccessToken;
+      await this.saveSettings();
     } else {
       if (attempt > 20) {
         console.log('Readwise Official plugin: reached attempt limit in getUserAuthToken');
@@ -655,8 +669,6 @@ class ReadwiseSettingTab extends PluginSettingTab {
                 new Notice("Readwise sync already in progress");
               } else {
                 this.plugin.clearInfoStatus(containerEl);
-                this.plugin.settings.isSyncing = true;
-                await this.plugin.saveSettings();
                 await this.plugin.refreshBookExport();
               }
 
@@ -737,8 +749,7 @@ class ReadwiseSettingTab extends PluginSettingTab {
       if (this.plugin.settings.lastSyncFailed) {
         this.plugin.showInfoStatus(containerEl.find(".rw-setting-sync .rw-info-container").parentElement, "Last sync failed", "rw-error");
       }
-    }
-    if (!this.plugin.settings.token) {
+    } else {
       new Setting(containerEl)
         .setName("Connect Obsidian to Readwise")
         .setClass("rw-setting-connect")
@@ -747,7 +758,10 @@ class ReadwiseSettingTab extends PluginSettingTab {
           button.setButtonText("Connect").setCta().onClick(async (evt) => {
             const success = await this.plugin.getUserAuthToken(evt.target as HTMLElement);
             if (success) {
+              // re-render the settings
               this.display();
+
+              this.plugin.notice("Readwise connected", true);
             }
           });
         });
