@@ -144,15 +144,15 @@ export default class ReadwisePlugin extends Plugin {
           // then keep polling
           await this.getExportStatus(statusID, buttonContext);
         } else if (SUCCESS_STATUSES.includes(data.taskStatus)) {
-          console.log('New highlights found, downloading archive');
           await this.downloadArchive(statusID, buttonContext);
         } else {
-          console.log("Readwise Official plugin: bad response in getExportStatus: ", response);
-          this.handleSyncError(buttonContext, this.getErrorMessageFromResponse(response));
+          console.log("Readwise Official plugin: unknown status in getExportStatus: ", data);
+          this.handleSyncError(buttonContext, "Sync failed");
           return;
         }
       } else {
-        this.handleSyncError(buttonContext, "Sync failed");
+        console.log("Readwise Official plugin: bad response in getExportStatus: ", response);
+        this.handleSyncError(buttonContext, this.getErrorMessageFromResponse(response));
       }
     } catch (e) {
       console.log("Readwise Official plugin: fetch failed in getExportStatus: ", e);
