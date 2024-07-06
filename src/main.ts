@@ -156,7 +156,7 @@ export default class ReadwisePlugin extends Plugin {
       }
     } catch (e) {
       console.log("Readwise Official plugin: fetch failed in getExportStatus: ", e);
-      this.handleSyncError(buttonContext, this.getErrorMessageFromResponse(e));
+      this.handleSyncError(buttonContext, "Sync failed");
     }
   }
 
