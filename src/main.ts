@@ -116,7 +116,7 @@ export default class ReadwisePlugin extends Plugin {
 
   /** Polls the Readwise API for the status of a given export;
    * uses recursion for polling so that it can be awaited. */
-  async checkStatus(statusID: number, buttonContext?: ButtonComponent) {
+  async getExportStatus(statusID: number, buttonContext?: ButtonComponent) {
     try {
       const response = await fetch(
         `${baseURL}/api/get_export_status?exportStatusId=${statusID}`,
@@ -142,12 +142,12 @@ export default class ReadwisePlugin extends Plugin {
           // wait 1 second
           await new Promise(resolve => setTimeout(resolve, 1000));
           // then keep polling
-          await this.checkStatus(statusID, buttonContext);
+          await this.getExportStatus(statusID, buttonContext);
         } else if (SUCCESS_STATUSES.includes(data.taskStatus)) {
           console.log('New highlights found, downloading archive');
           await this.downloadArchive(statusID, buttonContext);
         } else {
-          console.log("Readwise Official plugin: bad response in checkStatus: ", response);
+          console.log("Readwise Official plugin: bad response in getExportStatus: ", response);
           this.handleSyncError(buttonContext, this.getErrorMessageFromResponse(response));
           return;
         }
@@ -155,7 +155,7 @@ export default class ReadwisePlugin extends Plugin {
         this.handleSyncError(buttonContext, "Sync failed");
       }
     } catch (e) {
-      console.log("Readwise Official plugin: fetch failed in checkStatus: ", e);
+      console.log("Readwise Official plugin: fetch failed in getExportStatus: ", e);
     }
   }
 
@@ -199,7 +199,7 @@ export default class ReadwisePlugin extends Plugin {
 
       if (response.status === 201) {
         this.notice("Syncing Readwise data");
-        await this.checkStatus(this.settings.currentSyncStatusID, buttonContext);
+        await this.getExportStatus(this.settings.currentSyncStatusID, buttonContext);
         console.log('Readwise Official plugin: requestArchive done');
       } else {
         this.handleSyncSuccess(buttonContext, "Synced", data.latest_id);
@@ -577,7 +577,7 @@ export default class ReadwisePlugin extends Plugin {
     // ensure workspace is settled; this ensures cache is loaded
     this.app.workspace.onLayoutReady(async () => {
       if (this.settings.isSyncing && this.settings.currentSyncStatusID) {
-        await this.checkStatus(this.settings.currentSyncStatusID);
+        await this.getExportStatus(this.settings.currentSyncStatusID);
       } else {
         // we probably got some unhandled error...
         this.settings.isSyncing = false;
