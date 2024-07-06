@@ -114,50 +114,53 @@ export default class ReadwisePlugin extends Plugin {
     }
   }
 
-  /** Recursively runs while status pending */
-  async getExportStatus(statusID?: number, buttonContext?: ButtonComponent) {
-    const statusId = statusID || this.settings.currentSyncStatusID;
-    let url = `${baseURL}/api/get_export_status?exportStatusId=${statusId}`;
-    let response, data: ExportStatusResponse;
+  /** Polls the Readwise API for the status of a given export;
+   * uses recursion for polling so that it can be awaited. */
+  async checkStatus(statusID: number, buttonContext?: ButtonComponent) {
     try {
-      response = await fetch(
-        url,
+      const response = await fetch(
+        `${baseURL}/api/get_export_status?exportStatusId=${statusID}`,
         {
-          headers: this.getAuthHeaders()
+          headers: this.getAuthHeaders(),
         }
       );
-    } catch (e) {
-      console.log("Readwise Official plugin: fetch failed in getExportStatus: ", e);
-    }
-    if (response && response.ok) {
-      data = await response.json();
-    } else {
-      console.log("Readwise Official plugin: bad response in getExportStatus: ", response);
-      this.handleSyncError(buttonContext, this.getErrorMessageFromResponse(response));
-      return;
-    }
-    const WAITING_STATUSES = ['PENDING', 'RECEIVED', 'STARTED', 'RETRY'];
-    const SUCCESS_STATUSES = ['SUCCESS'];
-    if (WAITING_STATUSES.includes(data.taskStatus)) {
-      if (data.booksExported) {
-        const progressMsg = `Exporting Readwise data (${data.booksExported} / ${data.totalBooks}) ...`;
-        this.notice(progressMsg);
-      } else {
-        this.notice("Building export...");
-      }
 
-      // re-try in 1 second
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      await this.getExportStatus(statusId, buttonContext);
-    } else if (SUCCESS_STATUSES.includes(data.taskStatus)) {
-      return this.downloadArchive(statusId, buttonContext);
-    } else {
-      this.handleSyncError(buttonContext, "Sync failed");
+      if (response && response.ok) {
+        const data: ExportStatusResponse = await response.json();
+
+        const WAITING_STATUSES = ['PENDING', 'RECEIVED', 'STARTED', 'RETRY'];
+        const SUCCESS_STATUSES = ['SUCCESS'];
+
+        if (WAITING_STATUSES.includes(data.taskStatus)) {
+          if (data.booksExported) {
+            const progressMsg = `Exporting Readwise data (${data.booksExported} / ${data.totalBooks}) ...`;
+            this.notice(progressMsg);
+          } else {
+            this.notice("Building export...");
+          }
+
+          // wait 1 second
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          // then keep polling
+          await this.checkStatus(statusID, buttonContext);
+        } else if (SUCCESS_STATUSES.includes(data.taskStatus)) {
+          console.log('New highlights found, downloading archive');
+          await this.downloadArchive(statusID, buttonContext);
+        } else {
+          console.log("Readwise Official plugin: bad response in checkStatus: ", response);
+          this.handleSyncError(buttonContext, this.getErrorMessageFromResponse(response));
+          return;
+        }
+      } else {
+        this.handleSyncError(buttonContext, "Sync failed");
+      }
+    } catch (e) {
+      console.log("Readwise Official plugin: fetch failed in checkStatus: ", e);
     }
   }
 
-  /** Requests a new archive export from Readwise. */
   async requestArchive(buttonContext?: ButtonComponent, statusId?: number, auto?: boolean) {
+    console.log('Readwise Official plugin: requesting archive...');
 
     const parentDeleted = !await this.app.vault.adapter.exists(this.settings.readwiseDir);
 
@@ -179,20 +182,27 @@ export default class ReadwisePlugin extends Plugin {
     } catch (e) {
       console.log("Readwise Official plugin: fetch failed in requestArchive: ", e);
     }
+
     if (response && response.ok) {
       data = await response.json();
+
       if (data.latest_id <= this.settings.lastSavedStatusID) {
         this.handleSyncSuccess(buttonContext);
         this.notice("Readwise data is already up to date", false, 4, true);
         return;
       }
+
+      // save the sync status ID so it can be polled until the archive is ready
       this.settings.currentSyncStatusID = data.latest_id;
       await this.saveSettings();
+      console.log("Readwise Official plugin: saved currentSyncStatusID", this.settings.currentSyncStatusID);
+
       if (response.status === 201) {
         this.notice("Syncing Readwise data");
-        return this.getExportStatus(data.latest_id, buttonContext);
+        await this.checkStatus(this.settings.currentSyncStatusID, buttonContext);
+        console.log('Readwise Official plugin: requestArchive done');
       } else {
-        this.handleSyncSuccess(buttonContext, "Synced", data.latest_id); // we pass the export id to update lastSavedStatusID
+        this.handleSyncSuccess(buttonContext, "Synced", data.latest_id);
         this.notice("Latest Readwise sync already happened on your other device. Data should be up to date", false, 4, true);
       }
     } else {
@@ -201,6 +211,7 @@ export default class ReadwisePlugin extends Plugin {
       return;
     }
   }
+
 
   notice(msg: string, show = false, timeout = 0, forcing: boolean = false) {
     if (show) {
@@ -347,15 +358,22 @@ export default class ReadwisePlugin extends Plugin {
     window.clearInterval(this.scheduleInterval);
     this.scheduleInterval = null;
     if (!milliseconds) {
-      // we got manual option
+      // user set frequency to manual
       return;
     }
-    this.scheduleInterval = window.setInterval(() => this.requestArchive(null, null, true), milliseconds);
+    this.scheduleInterval = window.setInterval(() => this.refreshBookExport(undefined, true), milliseconds);
     this.registerInterval(this.scheduleInterval);
   }
 
-  /** Initiates a sync, or queues refresh for later if queue fails */
-  async refreshBookExport(bookIds?: Array<string>) {
+  /** Initiates a sync, or queues refresh for later if queue fails.
+   * ALL syncing goes through this function. */
+  async refreshBookExport(
+    /** optional list of specific book IDs to sync */
+    bookIds?: Array<string>,
+
+    /** if true, was not initiated by user */
+    auto?: boolean,
+  ) {
     if (!this.settings.token) return;
 
     const targetBookIds = bookIds || this.settings.booksToRefresh;
@@ -380,9 +398,12 @@ export default class ReadwisePlugin extends Plugin {
     }
 
     if (!targetBookIds.length) {
-      this.notice("nothing to refresh", false);
+      console.log('Readwise Official plugin: no targetBookIds, triggering check for other updates...');
+      await this.requestArchive(null, null, auto);
       return;
     }
+
+    console.log('Readwise Official plugin: refreshing books', { targetBookIds  });
 
     try {
       const response = await fetch(
@@ -447,20 +468,13 @@ export default class ReadwisePlugin extends Plugin {
   async onload() {
     await this.loadSettings();
 
-    // @ts-ignore
+    // @ts-expect-error - no type for isMobile
     if (!this.app.isMobile) {
       this.statusBar = new StatusBar(this.addStatusBarItem());
       this.registerInterval(
         window.setInterval(() => this.statusBar.display(), 1000)
       );
     }
-
-    // ensure workspace is loaded (especially cache) before requesting a refresh
-    this.app.workspace.onLayoutReady(async () => {
-      if (this.settings.triggerOnLoad) {
-        await this.refreshBookExport(this.settings.booksToRefresh);
-      }
-    });
 
     this.app.vault.on("delete", async (file) => {
       const bookId = this.settings.booksIDsMap[file.path];
@@ -480,15 +494,6 @@ export default class ReadwisePlugin extends Plugin {
       delete this.settings.booksIDsMap[oldPath];
       this.saveSettings();
     });
-    if (this.settings.isSyncing) {
-      if (this.settings.currentSyncStatusID) {
-        await this.getExportStatus();
-      } else {
-        // we probably got some unhandled error...
-        this.settings.isSyncing = false;
-        await this.saveSettings();
-      }
-    }
     this.addCommand({
       id: 'readwise-official-sync',
       name: 'Sync your data now',
@@ -566,8 +571,25 @@ export default class ReadwisePlugin extends Plugin {
         strongEl.replaceWith(replacement);
       });
     });
+
     this.addSettingTab(new ReadwiseSettingTab(this.app, this));
-    await this.configureSchedule();
+
+    // ensure workspace is settled; this ensures cache is loaded
+    this.app.workspace.onLayoutReady(async () => {
+      if (this.settings.isSyncing && this.settings.currentSyncStatusID) {
+        await this.checkStatus(this.settings.currentSyncStatusID);
+      } else {
+        // we probably got some unhandled error...
+        this.settings.isSyncing = false;
+        await this.saveSettings();
+      }
+
+      if (this.settings.triggerOnLoad) {
+        await this.refreshBookExport(undefined, true);
+      }
+
+      await this.configureSchedule();
+    });
   }
 
   onunload() {
@@ -671,7 +693,6 @@ class ReadwiseSettingTab extends PluginSettingTab {
                 this.plugin.clearInfoStatus(containerEl);
                 await this.plugin.refreshBookExport();
               }
-
             });
         });
       let el = containerEl.createEl("div", {cls: "rw-info-container"});
