@@ -81,10 +81,10 @@ export default class ReadwisePlugin extends Plugin {
     return `${response ? response.statusText : "Can't connect to server"}`;
   }
 
-  handleSyncError(buttonContext: ButtonComponent, msg: string) {
-    this.clearSettingsAfterRun();
+  async handleSyncError(buttonContext: ButtonComponent, msg: string) {
+    await this.clearSettingsAfterRun();
     this.settings.lastSyncFailed = true;
-    this.saveSettings();
+    await this.saveSettings();
     if (buttonContext) {
       this.showInfoStatus(buttonContext.buttonEl.parentElement, msg, "rw-error");
       buttonContext.buttonEl.setText("Run sync");
@@ -93,19 +93,19 @@ export default class ReadwisePlugin extends Plugin {
     }
   }
 
-  clearSettingsAfterRun() {
+  async clearSettingsAfterRun() {
     this.settings.isSyncing = false;
     this.settings.currentSyncStatusID = 0;
+    await this.saveSettings();
   }
 
-  handleSyncSuccess(buttonContext: ButtonComponent, msg: string = "Synced", exportID: number = null) {
-    this.clearSettingsAfterRun();
+  async handleSyncSuccess(buttonContext: ButtonComponent, msg: string = "Synced", exportID: number = null) {
+    await this.clearSettingsAfterRun();
     this.settings.lastSyncFailed = false;
-    this.settings.currentSyncStatusID = 0;
     if (exportID) {
       this.settings.lastSavedStatusID = exportID;
     }
-    this.saveSettings();
+    await this.saveSettings();
     // if we have a button context, update the text on it
     // this is the case if we fired on a "Run sync" click (the button)
     if (buttonContext) {
@@ -147,16 +147,16 @@ export default class ReadwisePlugin extends Plugin {
           await this.downloadArchive(statusID, buttonContext);
         } else {
           console.log("Readwise Official plugin: unknown status in getExportStatus: ", data);
-          this.handleSyncError(buttonContext, "Sync failed");
+          await this.handleSyncError(buttonContext, "Sync failed");
           return;
         }
       } else {
         console.log("Readwise Official plugin: bad response in getExportStatus: ", response);
-        this.handleSyncError(buttonContext, this.getErrorMessageFromResponse(response));
+        await this.handleSyncError(buttonContext, this.getErrorMessageFromResponse(response));
       }
     } catch (e) {
       console.log("Readwise Official plugin: fetch failed in getExportStatus: ", e);
-      this.handleSyncError(buttonContext, "Sync failed");
+      await this.handleSyncError(buttonContext, "Sync failed");
     }
   }
 
@@ -188,7 +188,7 @@ export default class ReadwisePlugin extends Plugin {
       data = await response.json();
 
       if (data.latest_id <= this.settings.lastSavedStatusID) {
-        this.handleSyncSuccess(buttonContext);
+        await this.handleSyncSuccess(buttonContext);
         this.notice("Readwise data is already up to date", false, 4, true);
         return;
       }
@@ -203,12 +203,12 @@ export default class ReadwisePlugin extends Plugin {
         await this.getExportStatus(this.settings.currentSyncStatusID, buttonContext);
         console.log('Readwise Official plugin: requestArchive done');
       } else {
-        this.handleSyncSuccess(buttonContext, "Synced", data.latest_id);
+        await this.handleSyncSuccess(buttonContext, "Synced", data.latest_id);
         this.notice("Latest Readwise sync already happened on your other device. Data should be up to date", false, 4, true);
       }
     } else {
       console.log("Readwise Official plugin: bad response in requestArchive: ", response);
-      this.handleSyncError(buttonContext, this.getErrorMessageFromResponse(response));
+      await this.handleSyncError(buttonContext, this.getErrorMessageFromResponse(response));
       return;
     }
   }
@@ -250,7 +250,7 @@ export default class ReadwisePlugin extends Plugin {
     let artifactURL = `${baseURL}/api/download_artifact/${exportID}`;
     if (exportID <= this.settings.lastSavedStatusID) {
       console.log(`Readwise Official plugin: Already saved data from export ${exportID}`);
-      this.handleSyncSuccess(buttonContext);
+      await this.handleSyncSuccess(buttonContext);
       this.notice("Readwise data is already up to date", false, 4);
       return;
     }
@@ -267,7 +267,7 @@ export default class ReadwisePlugin extends Plugin {
       blob = await response.blob();
     } else {
       console.log("Readwise Official plugin: bad response in downloadArchive: ", response);
-      this.handleSyncError(buttonContext, this.getErrorMessageFromResponse(response));
+      await this.handleSyncError(buttonContext, this.getErrorMessageFromResponse(response));
       return;
     }
 
@@ -322,7 +322,7 @@ export default class ReadwisePlugin extends Plugin {
     // close the ZipReader
     await zipReader.close();
     await this.acknowledgeSyncCompleted(buttonContext);
-    this.handleSyncSuccess(buttonContext, "Synced!", exportID);
+    await this.handleSyncSuccess(buttonContext, "Synced!", exportID);
     this.notice("Readwise sync completed", true, 1, true);
     console.log("Readwise Official plugin: completed sync");
     // @ts-ignore
@@ -347,7 +347,7 @@ export default class ReadwisePlugin extends Plugin {
       return;
     } else {
       console.log("Readwise Official plugin: bad response in acknowledge sync: ", response);
-      this.handleSyncError(buttonContext, this.getErrorMessageFromResponse(response));
+      await this.handleSyncError(buttonContext, this.getErrorMessageFromResponse(response));
       return;
     }
   }
@@ -486,14 +486,14 @@ export default class ReadwisePlugin extends Plugin {
         await this.addBookToRefresh(bookId);
       }
     });
-    this.app.vault.on("rename", (file, oldPath) => {
+    this.app.vault.on("rename", async (file, oldPath) => {
       const bookId = this.settings.booksIDsMap[oldPath];
       if (!bookId) {
         return;
       }
-      this.settings.booksIDsMap[file.path] = bookId;
       delete this.settings.booksIDsMap[oldPath];
-      this.saveSettings();
+      this.settings.booksIDsMap[file.path] = bookId;
+      await this.saveSettings();
     });
     this.addCommand({
       id: 'readwise-official-sync',
@@ -532,10 +532,10 @@ export default class ReadwisePlugin extends Plugin {
           const showConfContainer = modal.contentEl.createEl('div', {'cls': 'rw-modal-confirmation'});
           showConfContainer.createEl("label", {"attr": {"for": "rw-ask-nl"}, "text": "Don't ask me in the future"});
           const showConf = showConfContainer.createEl("input", {"type": "checkbox", "attr": {"name": "rw-ask-nl", "id": "rw-ask-nl"}});
-          showConf.addEventListener('change', (ev) => {
-            // @ts-ignore
+          showConf.addEventListener('change', async (ev) => {
+            // @ts-expect-error - target.checked is not typed (TODO add type narrowing)
             this.settings.reimportShowConfirmation = !ev.target.checked;
-            this.saveSettings();
+            await this.saveSettings();
           });
           cancelBtn.onClickEvent(() => {
             modal.close();
@@ -733,10 +733,10 @@ class ReadwiseSettingTab extends PluginSettingTab {
           // select the currently-saved option
           dropdown.setValue(this.plugin.settings.frequency);
 
-          dropdown.onChange((newValue) => {
+          dropdown.onChange(async (newValue) => {
             // update the plugin settings
             this.plugin.settings.frequency = newValue;
-            this.plugin.saveSettings();
+            await this.plugin.saveSettings();
 
             // destroy & re-create the scheduled task
             this.plugin.configureSchedule();
@@ -747,9 +747,9 @@ class ReadwiseSettingTab extends PluginSettingTab {
         .setDesc("If enabled, Readwise will automatically resync with Obsidian each time you open the app")
         .addToggle((toggle) => {
             toggle.setValue(this.plugin.settings.triggerOnLoad);
-            toggle.onChange((val) => {
+            toggle.onChange(async (val) => {
               this.plugin.settings.triggerOnLoad = val;
-              this.plugin.saveSettings();
+              await this.plugin.saveSettings();
             });
           }
         );
