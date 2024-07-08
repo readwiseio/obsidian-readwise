@@ -312,8 +312,7 @@ export default class ReadwisePlugin extends Plugin {
           console.log(`Readwise Official plugin: error writing ${processedFileName}:`, e);
           this.notice(`Readwise: error while writing ${processedFileName}: ${e}`, true, 4, true);
           if (bookID) {
-            this.settings.booksToRefresh.push(bookID);
-            await this.saveSettings();
+            await this.addBookToRefresh(bookID);
           }
           // communicate with readwise?
         }
@@ -421,7 +420,8 @@ export default class ReadwisePlugin extends Plugin {
         return;
       } else {
         console.log(`Readwise Official plugin: saving book id ${bookIds} to refresh later`);
-        this.settings.booksToRefresh = [...this.settings.booksToRefresh, ...bookIds]
+        const deduplicatedBookIds = new Set([...this.settings.booksToRefresh, ...bookIds]);
+        this.settings.booksToRefresh = Array.from(deduplicatedBookIds);
         await this.saveSettings();
         return;
       }
@@ -433,6 +433,7 @@ export default class ReadwisePlugin extends Plugin {
   async addBookToRefresh(bookId: string) {
     let booksToRefresh = this.settings.booksToRefresh;
     booksToRefresh.push(bookId);
+    console.log(`Readwise Official plugin: added book id ${bookId} to refresh later`);
     this.settings.booksToRefresh = booksToRefresh;
     await this.saveSettings();
   }
@@ -440,6 +441,7 @@ export default class ReadwisePlugin extends Plugin {
   async removeBooksFromRefresh(bookIds: Array<string> = []) {
     if (!bookIds.length) return;
 
+    console.log(`Readwise Official plugin: removing book ids ${bookIds.join(', ')} from refresh list`);
     this.settings.booksToRefresh = this.settings.booksToRefresh.filter(n => !bookIds.includes(n));
     await this.saveSettings();
   }
