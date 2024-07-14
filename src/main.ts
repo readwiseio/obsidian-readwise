@@ -479,16 +479,6 @@ export default class ReadwisePlugin extends Plugin {
       );
     }
 
-    this.app.vault.on("delete", async (file) => {
-      // user has "Resync deleted files" enabled
-      if (this.settings.refreshBooks) {
-        const bookId = this.settings.booksIDsMap[file.path];
-        if (!bookId) return;
-
-        // queue the book for refresh
-        await this.addBookToRefresh(bookId);
-      }
-    });
     this.app.vault.on("rename", async (file, oldPath) => {
       const bookId = this.settings.booksIDsMap[oldPath];
       if (!bookId) {
