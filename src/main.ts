@@ -390,7 +390,7 @@ export default class ReadwisePlugin extends Plugin {
       }
     }
 
-    const hasNeverSynced = !Object.keys(this.settings.booksIDsMap).length;
+    const hasNeverSynced = !knownFilesPaths.length;
     if (hasNeverSynced) {
       this.notice("Preparing initial Readwise sync...", true);
       await this.startSync();
