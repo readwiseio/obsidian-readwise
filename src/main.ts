@@ -160,6 +160,7 @@ export default class ReadwisePlugin extends Plugin {
     }
   }
 
+  /** Requests the archive from Readwise, polling until it's ready */
   async requestArchive(buttonContext?: ButtonComponent, statusId?: number, auto?: boolean) {
     console.log('Readwise Official plugin: requesting archive...');
 
@@ -361,13 +362,13 @@ export default class ReadwisePlugin extends Plugin {
       // user set frequency to manual
       return;
     }
-    this.scheduleInterval = window.setInterval(() => this.refreshBookExport(undefined, true), milliseconds);
+    this.scheduleInterval = window.setInterval(() => this.syncBookHighlights(undefined, true), milliseconds);
     this.registerInterval(this.scheduleInterval);
   }
 
-  /** Initiates a sync, or queues refresh for later if queue fails.
-   * ALL syncing goes through this function. */
-  async refreshBookExport(
+  /** Syncs provided book IDs, or uses the booksToRefresh list if none provided.
+   * ALL syncing starts with this function. */
+  async syncBookHighlights(
     /** optional list of specific book IDs to sync */
     bookIds?: Array<string>,
 
@@ -451,12 +452,13 @@ export default class ReadwisePlugin extends Plugin {
       this.notice("Deleting and reimporting file...", true);
       await vault.delete(vault.getAbstractFileByPath(fileName));
       const bookId = this.settings.booksIDsMap[fileName];
-      await this.refreshBookExport([bookId]);
+      await this.syncBookHighlights([bookId]);
     } catch (e) {
       console.log("Readwise Official plugin: fetch failed in Reimport current file: ", e);
     }
   }
 
+  /** Marks syncing as initiated, then requests the archive */
   async startSync() {
     if (this.settings.isSyncing) {
       this.notice("Readwise sync already in progress", true);
@@ -492,7 +494,7 @@ export default class ReadwisePlugin extends Plugin {
       id: 'readwise-official-sync',
       name: 'Sync your data now',
       callback: () => {
-        this.refreshBookExport();
+        this.syncBookHighlights();
       }
     });
     this.addCommand({
@@ -579,7 +581,7 @@ export default class ReadwisePlugin extends Plugin {
       }
 
       if (this.settings.triggerOnLoad) {
-        await this.refreshBookExport(undefined, true);
+        await this.syncBookHighlights(undefined, true);
       }
 
       await this.configureSchedule();
@@ -685,7 +687,7 @@ class ReadwiseSettingTab extends PluginSettingTab {
                 new Notice("Readwise sync already in progress");
               } else {
                 this.plugin.clearInfoStatus(containerEl);
-                await this.plugin.refreshBookExport();
+                await this.plugin.syncBookHighlights();
               }
             });
         });
@@ -755,7 +757,7 @@ class ReadwiseSettingTab extends PluginSettingTab {
             this.plugin.settings.refreshBooks = val;
             await this.plugin.saveSettings();
             if (val) {
-              await this.plugin.refreshBookExport();
+              await this.plugin.syncBookHighlights();
             }
           });
         }
