@@ -11,7 +11,7 @@ import {
   Vault
 } from 'obsidian';
 import * as zip from "@zip.js/zip.js";
-import {StatusBar} from "./status";
+import { StatusBar } from "./status";
 
 
 // the process.env variable will be replaced by its target value in the output main.js file
@@ -258,7 +258,7 @@ export default class ReadwisePlugin extends Plugin {
     let response, blob;
     try {
       response = await fetch(
-        artifactURL, {headers: this.getAuthHeaders()}
+        artifactURL, { headers: this.getAuthHeaders() }
       );
     } catch (e) {
       console.log("Readwise Official plugin: fetch failed in downloadArchive: ", e);
@@ -336,7 +336,7 @@ export default class ReadwisePlugin extends Plugin {
       response = await fetch(
         `${baseURL}/api/obsidian/sync_ack`,
         {
-          headers: {...this.getAuthHeaders(), 'Content-Type': 'application/json'},
+          headers: { ...this.getAuthHeaders(), 'Content-Type': 'application/json' },
           method: "POST",
         });
     } catch (e) {
@@ -403,15 +403,15 @@ export default class ReadwisePlugin extends Plugin {
       return;
     }
 
-    console.log('Readwise Official plugin: refreshing books', { targetBookIds  });
+    console.log('Readwise Official plugin: refreshing books', { targetBookIds });
 
     try {
       const response = await fetch(
         `${baseURL}/api/refresh_book_export`,
         {
-          headers: {...this.getAuthHeaders(), 'Content-Type': 'application/json'},
+          headers: { ...this.getAuthHeaders(), 'Content-Type': 'application/json' },
           method: "POST",
-          body: JSON.stringify({exportTarget: 'obsidian', books: targetBookIds})
+          body: JSON.stringify({ exportTarget: 'obsidian', books: targetBookIds })
         }
       );
 
@@ -519,12 +519,12 @@ export default class ReadwisePlugin extends Plugin {
                 'and then reimport a new copy of your highlights from Readwise.',
               cls: 'rw-modal-warning-text',
             });
-          const buttonsContainer = modal.contentEl.createEl('div', {"cls": "rw-modal-btns"});
-          const cancelBtn = buttonsContainer.createEl("button", {"text": "Cancel"});
-          const confirmBtn = buttonsContainer.createEl("button", {"text": "Proceed", 'cls': 'mod-warning'});
-          const showConfContainer = modal.contentEl.createEl('div', {'cls': 'rw-modal-confirmation'});
-          showConfContainer.createEl("label", {"attr": {"for": "rw-ask-nl"}, "text": "Don't ask me in the future"});
-          const showConf = showConfContainer.createEl("input", {"type": "checkbox", "attr": {"name": "rw-ask-nl", "id": "rw-ask-nl"}});
+          const buttonsContainer = modal.contentEl.createEl('div', { "cls": "rw-modal-btns" });
+          const cancelBtn = buttonsContainer.createEl("button", { "text": "Cancel" });
+          const confirmBtn = buttonsContainer.createEl("button", { "text": "Proceed", 'cls': 'mod-warning' });
+          const showConfContainer = modal.contentEl.createEl('div', { 'cls': 'rw-modal-confirmation' });
+          showConfContainer.createEl("label", { "attr": { "for": "rw-ask-nl" }, "text": "Don't ask me in the future" });
+          const showConf = showConfContainer.createEl("input", { "type": "checkbox", "attr": { "name": "rw-ask-nl", "id": "rw-ask-nl" } });
           showConf.addEventListener('change', async (ev) => {
             // @ts-expect-error - target.checked is not typed (TODO add type narrowing)
             this.settings.reimportShowConfirmation = !ev.target.checked;
@@ -660,13 +660,13 @@ class ReadwiseSettingTab extends PluginSettingTab {
 
 
   display(): void {
-    let {containerEl} = this;
+    let { containerEl } = this;
 
     containerEl.empty();
-    containerEl.createEl('h1', {text: 'Readwise Official'});
-    containerEl.createEl('p', {text: 'Created by '}).createEl('a', {text: 'Readwise', href: 'https://readwise.io'});
+    containerEl.createEl('h1', { text: 'Readwise Official' });
+    containerEl.createEl('p', { text: 'Created by ' }).createEl('a', { text: 'Readwise', href: 'https://readwise.io' });
     containerEl.getElementsByTagName('p')[0].appendText(' 📚');
-    containerEl.createEl('h2', {text: 'Settings'});
+    containerEl.createEl('h2', { text: 'Settings' });
 
     if (this.plugin.settings.token) {
       new Setting(containerEl)
@@ -689,7 +689,7 @@ class ReadwiseSettingTab extends PluginSettingTab {
               }
             });
         });
-      let el = containerEl.createEl("div", {cls: "rw-info-container"});
+      let el = containerEl.createEl("div", { cls: "rw-info-container" });
       containerEl.find(".rw-setting-sync > .setting-item-control ").prepend(el);
 
       new Setting(containerEl)
@@ -722,7 +722,7 @@ class ReadwiseSettingTab extends PluginSettingTab {
           dropdown.addOption((12 * 60).toString(), "Every 12 hours");
           dropdown.addOption((24 * 60).toString(), "Every 24 hours");
           dropdown.addOption((7 * 24 * 60).toString(), "Every week");
-        
+
           // select the currently-saved option
           dropdown.setValue(this.plugin.settings.frequency);
 
@@ -739,26 +739,26 @@ class ReadwiseSettingTab extends PluginSettingTab {
         .setName("Sync automatically when Obsidian opens")
         .setDesc("If enabled, Readwise will automatically resync with Obsidian each time you open the app")
         .addToggle((toggle) => {
-            toggle.setValue(this.plugin.settings.triggerOnLoad);
-            toggle.onChange(async (val) => {
-              this.plugin.settings.triggerOnLoad = val;
-              await this.plugin.saveSettings();
-            });
-          }
+          toggle.setValue(this.plugin.settings.triggerOnLoad);
+          toggle.onChange(async (val) => {
+            this.plugin.settings.triggerOnLoad = val;
+            await this.plugin.saveSettings();
+          });
+        }
         );
       new Setting(containerEl)
         .setName("Resync deleted files")
         .setDesc("If enabled, you can refresh individual items by deleting the file in Obsidian and initiating a resync")
         .addToggle((toggle) => {
-            toggle.setValue(this.plugin.settings.refreshBooks);
-            toggle.onChange(async (val) => {
-              this.plugin.settings.refreshBooks = val;
-              await this.plugin.saveSettings();
-              if (val) {
-                await this.plugin.refreshBookExport();
-              }
-            });
-          }
+          toggle.setValue(this.plugin.settings.refreshBooks);
+          toggle.onChange(async (val) => {
+            this.plugin.settings.refreshBooks = val;
+            await this.plugin.saveSettings();
+            if (val) {
+              await this.plugin.refreshBookExport();
+            }
+          });
+        }
         );
 
       if (this.plugin.settings.lastSyncFailed) {
@@ -780,7 +780,7 @@ class ReadwiseSettingTab extends PluginSettingTab {
             }
           });
         });
-      let el = containerEl.createEl("div", {cls: "rw-info-container"});
+      let el = containerEl.createEl("div", { cls: "rw-info-container" });
       containerEl.find(".rw-setting-connect > .setting-item-control ").prepend(el);
     }
     const help = containerEl.createEl('p',);
