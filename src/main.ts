@@ -83,7 +83,7 @@ const DEFAULT_SETTINGS: ReadwisePluginSettings = {
 
 export default class ReadwisePlugin extends Plugin {
   settings: ReadwisePluginSettings;
-  fs: dDataAdapter;
+  fs: DataAdapter;
   vault: Vault;
   scheduleInterval: null | number = null;
   statusBar: StatusBar;
