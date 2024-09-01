@@ -359,7 +359,6 @@ export default class ReadwisePlugin extends Plugin {
           }
           await this.fs.write(originalName, contentToSave);
           await this.removeBooksFromRefresh([bookID]);
-          await this.saveSettings();
         } catch (e) {
           console.log(`Readwise Official plugin: error writing ${processedFileName}:`, e);
           this.notice(`Readwise: error while writing ${processedFileName}: ${e}`, true, 4, true);
