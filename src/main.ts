@@ -66,19 +66,20 @@ interface ReadwisePluginSettings {
 }
 
 // define our initial settings
+// quoted keys for easy copying to data.json during development
 const DEFAULT_SETTINGS: ReadwisePluginSettings = {
-  token: "",
-  readwiseDir: "Readwise",
-  frequency: "0", // manual by default
-  triggerOnLoad: true,
-  isSyncing: false,
-  lastSyncFailed: false,
-  lastSavedStatusID: 0,
-  currentSyncStatusID: 0,
-  refreshBooks: false,
-  booksToRefresh: [],
-  booksIDsMap: {},
-  reimportShowConfirmation: true,
+  "token": "",
+  "readwiseDir": "Readwise",
+  "frequency": "0",
+  "triggerOnLoad": true,
+  "isSyncing": false,
+  "lastSyncFailed": false,
+  "lastSavedStatusID": 0,
+  "currentSyncStatusID": 0,
+  "refreshBooks": false,
+  "booksToRefresh": [],
+  "booksIDsMap": {},
+  "reimportShowConfirmation": true
 };
 
 export default class ReadwisePlugin extends Plugin {
