@@ -82,6 +82,9 @@ const DEFAULT_SETTINGS: ReadwisePluginSettings = {
   "reimportShowConfirmation": true
 };
 
+/** The name of the Readwise Sync history file, without the extension. */
+const READWISE_SYNC_FILENAME = "Readwise Sync" as const;
+
 export default class ReadwisePlugin extends Plugin {
   settings: ReadwisePluginSettings;
   fs: DataAdapter;
@@ -304,8 +307,40 @@ export default class ReadwisePlugin extends Plugin {
     this.notice("Saving files...", false, 30);
     if (entries.length) {
       for (const entry of entries) {
+        // will be derived from the entry's filename
         let bookID: string;
+
+        /** Combo of file `readwiseDir`, book name, and book ID.
+         * Example: `Readwise/Books/Name of Book--12345678.md` */
         const processedFileName = normalizePath(entry.filename.replace(/^Readwise/, this.settings.readwiseDir));
+
+        // derive the original name `(readwiseDir + book name).md`
+        let originalName = processedFileName;
+        // extracting book ID from file name
+        let split = processedFileName.split("--");
+        if (split.length > 1) {
+          originalName = split.slice(0, -1).join("--") + ".md";
+          bookID = split.last().match(/\d+/g)[0];
+
+          // track the book
+          this.settings.booksIDsMap[originalName] = bookID;
+        }
+
+        try {
+          const undefinedBook = !bookID || !processedFileName;
+          const isReadwiseSyncFile = processedFileName === `${this.settings.readwiseDir}/${READWISE_SYNC_FILENAME}.md`;
+          if (undefinedBook && !isReadwiseSyncFile) {
+            throw new Error(`Book ID or file name not found for entry: ${entry.filename}`);
+          }
+        } catch (e) {
+          console.error(`Error while processing entry: ${entry.filename}`);
+        }
+
+        // save the entry in settings to ensure that it can be
+        // retried later when deleted files are re-synced if
+        // the user has `settings.refreshBooks` enabled
+        if (bookID) await this.saveSettings();
+
         try {
           // ensure the directory exists
           let dirPath = processedFileName.replace(/\/*$/, '').replace(/^(.+)\/[^\/]*?$/, '$1');
@@ -317,14 +352,6 @@ export default class ReadwisePlugin extends Plugin {
           const contents = await entry.getData(new zip.TextWriter());
           let contentToSave = contents;
 
-          let originalName = processedFileName;
-          // extracting book ID from file name
-          let split = processedFileName.split("--");
-          if (split.length > 1) {
-            originalName = split.slice(0, -1).join("--") + ".md";
-            bookID = split.last().match(/\d+/g)[0];
-            this.settings.booksIDsMap[originalName] = bookID;
-          }
           if (await this.fs.exists(originalName)) {
             // if the file already exists we need to append content to existing one
             const existingContent = await this.fs.read(originalName);
