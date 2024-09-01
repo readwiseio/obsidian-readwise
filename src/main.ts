@@ -387,7 +387,8 @@ export default class ReadwisePlugin extends Plugin {
 
     // add potentially-missing books to booksToRefresh (TODO - prob a lil inefficient? 🤷)
     const knownFilesPaths = Object.keys(this.settings.booksIDsMap);
-    if (this.settings.refreshBooks) {
+    const shouldGetMissingBooks = this.settings.refreshBooks && !bookIds?.length;
+    if (shouldGetMissingBooks) {
       for (const knownFilePath of knownFilesPaths) {
         const file = this.app.vault.getAbstractFileByPath(knownFilePath);
         if (!file) {
