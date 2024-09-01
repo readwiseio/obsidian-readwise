@@ -35,16 +35,33 @@ interface ExportStatusResponse {
 
 interface ReadwisePluginSettings {
   token: string;
+
+  /** Folder to save highlights */
   readwiseDir: string;
+
+  /** Polling for pending export */
   isSyncing: boolean;
+
+  /** Frequency of automatic sync */
   frequency: string;
+
+  /** Automatically sync on load */
   triggerOnLoad: boolean;
+
   lastSyncFailed: boolean;
   lastSavedStatusID: number;
   currentSyncStatusID: number;
+
+  /** Should get any deleted books */
   refreshBooks: boolean,
+
+  /** Queue of books to refresh */
   booksToRefresh: Array<string>;
-  booksIDsMap: { [key: string]: string; };
+
+  /** Map of file path to book ID */
+  booksIDsMap: { [filePath: string]: string; };
+
+  /** User choice for confirming delete and reimport */
   reimportShowConfirmation: boolean;
 }
 
@@ -66,7 +83,7 @@ const DEFAULT_SETTINGS: ReadwisePluginSettings = {
 
 export default class ReadwisePlugin extends Plugin {
   settings: ReadwisePluginSettings;
-  fs: DataAdapter;
+  fs: dDataAdapter;
   vault: Vault;
   scheduleInterval: null | number = null;
   statusBar: StatusBar;
