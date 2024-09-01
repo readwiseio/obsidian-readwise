@@ -364,6 +364,7 @@ export default class ReadwisePlugin extends Plugin {
           console.log(`Readwise Official plugin: error writing ${processedFileName}:`, e);
           this.notice(`Readwise: error while writing ${processedFileName}: ${e}`, true, 4, true);
           if (bookID) {
+            // handles case where user doesn't have `settings.refreshBooks` enabled
             await this.addBookToRefresh(bookID);
           }
           // communicate with readwise?
