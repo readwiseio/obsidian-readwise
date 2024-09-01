@@ -82,8 +82,10 @@ const DEFAULT_SETTINGS: ReadwisePluginSettings = {
   "reimportShowConfirmation": true
 };
 
-/** The name of the Readwise Sync history file, without the extension. */
-const READWISE_SYNC_FILENAME = "Readwise Sync" as const;
+/** The name of the Readwise Sync history file, without the extension.
+ * This is described as "Sync notification" in the Obsidian export settings
+ * on the Readwise website. */
+const READWISE_SYNC_FILENAME = "Readwise Syncs" as const;
 
 export default class ReadwisePlugin extends Plugin {
   settings: ReadwisePluginSettings;
