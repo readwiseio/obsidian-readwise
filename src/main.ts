@@ -14,8 +14,8 @@ import * as zip from "@zip.js/zip.js";
 import { StatusBar } from "./status";
 
 
-// the process.env variable will be replaced by its target value in the output main.js file
-const baseURL = process.env.READWISE_SERVER_URL || "https://readwise.io";
+// switch to local dev server for development
+const baseURL = "https://readwise.io";
 
 interface ReadwiseAuthResponse {
   userAccessToken: string;
