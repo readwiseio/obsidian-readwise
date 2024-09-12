@@ -55,8 +55,12 @@ interface ReadwisePluginSettings {
   /** Should get any deleted books */
   refreshBooks: boolean,
 
-  /** Queue of books to refresh */
+  /** Queue of books to refresh.
+   * @deprecated LEGACY: only exists to preserve books that were deleted prior to v2.1.0 */
   booksToRefresh: Array<string>;
+
+  /** retryFailedBooks: queue of books to retry because of previous failure */
+  failedBooks: Array<string>;
 
   /** Map of file path to book ID */
   booksIDsMap: { [filePath: string]: string; };
@@ -78,6 +82,7 @@ const DEFAULT_SETTINGS: ReadwisePluginSettings = {
   "currentSyncStatusID": 0,
   "refreshBooks": false,
   "booksToRefresh": [],
+  "failedBooks": [],
   "booksIDsMap": {},
   "reimportShowConfirmation": true
 };
@@ -361,16 +366,18 @@ export default class ReadwisePlugin extends Plugin {
           }
           await this.fs.write(originalName, contentToSave);
           await this.removeBooksFromRefresh([bookID]);
+          await this.removeBookFromFailedBooks([bookID]);
         } catch (e) {
           console.log(`Readwise Official plugin: error writing ${processedFileName}:`, e);
           this.notice(`Readwise: error while writing ${processedFileName}: ${e}`, true, 4, true);
           if (bookID) {
             // handles case where user doesn't have `settings.refreshBooks` enabled
-            await this.addBookToRefresh(bookID);
+            await this.addToFailedBooks(bookID);
           }
           // communicate with readwise?
         }
       }
+      await this.saveSettings();
     }
     // close the ZipReader
     await zipReader.close();
@@ -430,7 +437,12 @@ export default class ReadwisePlugin extends Plugin {
   ) {
     if (!this.settings.token) return;
 
-    const targetBookIds = bookIds || this.settings.booksToRefresh;
+    let targetBookIds = bookIds
+
+    // handle legacy `booksToRefresh` setting; see tsdoc on bookssToRefresh
+    if (this.settings.refreshBooks) {
+      targetBookIds = targetBookIds || this.settings.booksToRefresh;
+    }
 
     // add potentially-missing books to booksToRefresh (TODO - prob a lil inefficient? 🤷)
     const knownFilesPaths = Object.keys(this.settings.booksIDsMap);
@@ -485,20 +497,33 @@ export default class ReadwisePlugin extends Plugin {
     }
   }
 
-  async addBookToRefresh(bookId: string) {
-    let booksToRefresh = this.settings.booksToRefresh;
-    booksToRefresh.push(bookId);
-    console.log(`Readwise Official plugin: added book id ${bookId} to refresh later`);
-    this.settings.booksToRefresh = booksToRefresh;
+  async addToFailedBooks(bookId: string) {
+    let failedBooks = this.settings.failedBooks || DEFAULT_SETTINGS.failedBooks;
+    failedBooks.push(bookId);
+    console.log(`Readwise Official plugin: added book id ${bookId} to failed books`);
+    this.settings.booksToRefresh = failedBooks;
     await this.saveSettings();
   }
 
+  /** @deprecated LEGACY: only exists to handle managing books that were deleted prior to v2.1.0 */
   async removeBooksFromRefresh(bookIds: Array<string> = []) {
     if (!bookIds.length) return;
 
     console.log(`Readwise Official plugin: removing book ids ${bookIds.join(', ')} from refresh list`);
     this.settings.booksToRefresh = this.settings.booksToRefresh.filter(n => !bookIds.includes(n));
-    await this.saveSettings();
+
+    // don't forget to save after!
+    // but don't do that here; this allows batching when removing multiple books.
+  }
+
+  async removeBookFromFailedBooks(bookIds: Array<string> = []) {
+    if (!bookIds.length) return;
+
+    console.log(`Readwise Official plugin: removing book ids ${bookIds.join(', ')} from failed list`);
+    this.settings.failedBooks = this.settings.failedBooks.filter(n => !bookIds.includes(n));
+
+    // don't forget to save after!
+    // but don't do that here; this allows batching when removing multiple books.
   }
 
   async reimportFile(vault: Vault, fileName: string) {
