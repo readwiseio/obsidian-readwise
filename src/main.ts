@@ -55,8 +55,11 @@ interface ReadwisePluginSettings {
   /** Should get any deleted books */
   refreshBooks: boolean,
 
-  /** Queue of books to refresh */
+  /** Queue of books to refresh. */
   booksToRefresh: Array<string>;
+
+  /** Queue of books to retry because of previous failure */
+  failedBooks: Array<string>;
 
   /** Map of file path to book ID */
   booksIDsMap: { [filePath: string]: string; };
@@ -78,6 +81,7 @@ const DEFAULT_SETTINGS: ReadwisePluginSettings = {
   "currentSyncStatusID": 0,
   "refreshBooks": false,
   "booksToRefresh": [],
+  "failedBooks": [],
   "booksIDsMap": {},
   "reimportShowConfirmation": true
 };
@@ -142,6 +146,7 @@ export default class ReadwisePlugin extends Plugin {
   async getExportStatus(statusID: number, buttonContext?: ButtonComponent) {
     try {
       const response = await fetch(
+        // status of archive build from this endpoint
         `${baseURL}/api/get_export_status?exportStatusId=${statusID}`,
         {
           headers: this.getAuthHeaders(),
@@ -196,6 +201,7 @@ export default class ReadwisePlugin extends Plugin {
 
     const parentDeleted = !await this.app.vault.adapter.exists(this.settings.readwiseDir);
 
+    // kickoff archive build form this endpoint
     let url = `${baseURL}/api/obsidian/init?parentPageDeleted=${parentDeleted}`;
     if (statusId) {
       url += `&statusID=${statusId}`;
@@ -277,6 +283,7 @@ export default class ReadwisePlugin extends Plugin {
   }
 
   async downloadExport(exportID: number, buttonContext: ButtonComponent): Promise<void> {
+    // download archive from this endpoint
     let artifactURL = `${baseURL}/api/download_artifact/${exportID}`;
     if (exportID <= this.settings.lastSavedStatusID) {
       console.log(`Readwise Official plugin: Already saved data from export ${exportID}`);
@@ -360,17 +367,22 @@ export default class ReadwisePlugin extends Plugin {
             contentToSave = existingContent + contents;
           }
           await this.fs.write(originalName, contentToSave);
-          await this.removeBooksFromRefresh([bookID]);
         } catch (e) {
           console.log(`Readwise Official plugin: error writing ${processedFileName}:`, e);
           this.notice(`Readwise: error while writing ${processedFileName}: ${e}`, true, 4, true);
           if (bookID) {
             // handles case where user doesn't have `settings.refreshBooks` enabled
-            await this.addBookToRefresh(bookID);
+            await this.addToFailedBooks(bookID);
+            await this.saveSettings();
+            return;
           }
           // communicate with readwise?
         }
+
+        await this.removeBooksFromRefresh([bookID]);
+        await this.removeBookFromFailedBooks([bookID]);
       }
+      await this.saveSettings();
     }
     // close the ZipReader
     await zipReader.close();
@@ -430,31 +442,27 @@ export default class ReadwisePlugin extends Plugin {
   ) {
     if (!this.settings.token) return;
 
-    const targetBookIds = bookIds || this.settings.booksToRefresh;
+    let targetBookIds = [
+      // try to sync provided bookIds
+      ...(bookIds || []),
 
-    // add potentially-missing books to booksToRefresh (TODO - prob a lil inefficient? 🤷)
-    const knownFilesPaths = Object.keys(this.settings.booksIDsMap);
-    const shouldGetMissingBooks = this.settings.refreshBooks && !bookIds?.length;
-    if (shouldGetMissingBooks) {
-      for (const knownFilePath of knownFilesPaths) {
-        const file = this.app.vault.getAbstractFileByPath(knownFilePath);
-        if (!file) {
-          const bookId = this.settings.booksIDsMap[knownFilePath];
-          targetBookIds.push(bookId);
-        }
-      }
-    }
+      // always try to sync failedBooks
+      ...this.settings.failedBooks,
+    ];
 
-    const hasNeverSynced = !knownFilesPaths.length;
-    if (hasNeverSynced) {
-      this.notice("Preparing initial Readwise sync...", true);
-      await this.queueExport();
-      return;
+    // only sync `booksToRefresh` items if "resync deleted files" enabled
+    if (this.settings.refreshBooks) {
+      targetBookIds = [
+        ...targetBookIds,
+        ...this.settings.booksToRefresh,
+      ];
     }
 
     if (!targetBookIds.length) {
-      console.log('Readwise Official plugin: no targetBookIds, triggering check for other updates...');
-      await this.queueExport(null, null, auto);
+      console.log('Readwise Official plugin: no targetBookIds, checking for new highlights');
+      // no need to hit refresh_book_export;
+      // just check if there's new highlights from the server
+      await this.queueExport();
       return;
     }
 
@@ -462,6 +470,10 @@ export default class ReadwisePlugin extends Plugin {
 
     try {
       const response = await fetch(
+        // add books to next archive build from this endpoint
+        // NOTE: should only end up calling this endpoint when:
+        // 1. there are failedBooks
+        // 2. there are booksToRefresh
         `${baseURL}/api/refresh_book_export`,
         {
           headers: { ...this.getAuthHeaders(), 'Content-Type': 'application/json' },
@@ -485,10 +497,22 @@ export default class ReadwisePlugin extends Plugin {
     }
   }
 
+  async addToFailedBooks(bookId: string) {
+    // NOTE: settings.failedBooks was added after initial settings schema,
+    // so not all users may have it, hence the fallback to DEFAULT_SETTINGS.failedBooks
+    let failedBooks = [...(this.settings.failedBooks || DEFAULT_SETTINGS.failedBooks)];
+    failedBooks.push(bookId);
+    console.log(`Readwise Official plugin: added book id ${bookId} to failed books`);
+    this.settings.failedBooks = failedBooks;
+
+    // don't forget to save after!
+    // but don't do that here; this allows batching when removing multiple books.
+  }
+
   async addBookToRefresh(bookId: string) {
-    let booksToRefresh = this.settings.booksToRefresh;
+    let booksToRefresh = [...this.settings.booksToRefresh];
     booksToRefresh.push(bookId);
-    console.log(`Readwise Official plugin: added book id ${bookId} to refresh later`);
+    console.log(`Readwise Official plugin: added book id ${bookId} to failed books`);
     this.settings.booksToRefresh = booksToRefresh;
     await this.saveSettings();
   }
@@ -498,7 +522,19 @@ export default class ReadwisePlugin extends Plugin {
 
     console.log(`Readwise Official plugin: removing book ids ${bookIds.join(', ')} from refresh list`);
     this.settings.booksToRefresh = this.settings.booksToRefresh.filter(n => !bookIds.includes(n));
-    await this.saveSettings();
+
+    // don't forget to save after!
+    // but don't do that here; this allows batching when removing multiple books.
+  }
+
+  async removeBookFromFailedBooks(bookIds: Array<string> = []) {
+    if (!bookIds.length) return;
+
+    console.log(`Readwise Official plugin: removing book ids ${bookIds.join(', ')} from failed list`);
+    this.settings.failedBooks = this.settings.failedBooks.filter(n => !bookIds.includes(n));
+
+    // don't forget to save after!
+    // but don't do that here; this allows batching when removing multiple books.
   }
 
   async reimportFile(vault: Vault, fileName: string) {
@@ -506,6 +542,10 @@ export default class ReadwisePlugin extends Plugin {
       this.notice("Deleting and reimporting file...", true);
       await vault.delete(vault.getAbstractFileByPath(fileName));
       const bookId = this.settings.booksIDsMap[fileName];
+      await this.addBookToRefresh(bookId);
+
+      // specifically re-sync this one file (not this.settings.booksToRefresh)
+      // because the user may have `settings.refreshBooks` disabled
       await this.syncBookHighlights([bookId]);
     } catch (e) {
       console.log("Readwise Official plugin: fetch failed in Reimport current file: ", e);
@@ -627,6 +667,26 @@ export default class ReadwisePlugin extends Plugin {
       }
 
       await this.configureSchedule();
+
+      this.app.vault.on("delete", async (file) => {
+        const bookId = this.settings.booksIDsMap[file.path];
+
+        if (bookId) {
+          // NOTE: because `on(delete)` also adds to `booksToRefresh`,
+          // the ID will be duplicated in `booksToRefresh`.
+          await this.addBookToRefresh(bookId);
+        }
+
+        delete this.settings.booksIDsMap[file.path];
+
+        // BUG: `on("delete")` events have no sequantial guarantees.
+        // meaning: if a user deletes many files at once,
+        // there is no guarantee that the event will be handled
+        // in any specific order. this can lead to reality
+        // drifting as book ID is deleted/saved as all the delete
+        // events compete to remove the book ID from the map and save.
+        await this.saveSettings();
+      });
     });
   }
 
