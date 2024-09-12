@@ -459,7 +459,10 @@ export default class ReadwisePlugin extends Plugin {
     }
 
     if (!targetBookIds.length) {
-      console.log('Readwise Official plugin: no targetBookIds, skipping sync');
+      console.log('Readwise Official plugin: no targetBookIds, checking for new highlights');
+      // no need to hit refresh_book_export;
+      // just check if there's new highlights from the server
+      await this.queueExport();
       return;
     }
 
