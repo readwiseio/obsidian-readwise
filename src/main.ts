@@ -498,10 +498,10 @@ export default class ReadwisePlugin extends Plugin {
   }
 
   async addToFailedBooks(bookId: string) {
-    let failedBooks = this.settings.failedBooks || DEFAULT_SETTINGS.failedBooks;
+    let failedBooks = [...(this.settings.failedBooks || DEFAULT_SETTINGS.failedBooks)];
     failedBooks.push(bookId);
     console.log(`Readwise Official plugin: added book id ${bookId} to failed books`);
-    this.settings.booksToRefresh = failedBooks;
+    this.settings.failedBooks = failedBooks;
     await this.saveSettings();
   }
 
