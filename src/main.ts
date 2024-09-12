@@ -437,7 +437,7 @@ export default class ReadwisePlugin extends Plugin {
   ) {
     if (!this.settings.token) return;
 
-    let targetBookIds = bookIds
+    let targetBookIds = bookIds || this.settings.failedBooks;
 
     // handle legacy `booksToRefresh` setting; see tsdoc on bookssToRefresh
     if (this.settings.refreshBooks) {
