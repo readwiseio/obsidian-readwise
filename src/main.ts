@@ -365,8 +365,6 @@ export default class ReadwisePlugin extends Plugin {
             contentToSave = existingContent + contents;
           }
           await this.fs.write(originalName, contentToSave);
-          await this.removeBooksFromRefresh([bookID]);
-          await this.removeBookFromFailedBooks([bookID]);
         } catch (e) {
           console.log(`Readwise Official plugin: error writing ${processedFileName}:`, e);
           this.notice(`Readwise: error while writing ${processedFileName}: ${e}`, true, 4, true);
@@ -376,6 +374,9 @@ export default class ReadwisePlugin extends Plugin {
           }
           // communicate with readwise?
         }
+
+        await this.removeBooksFromRefresh([bookID]);
+        await this.removeBookFromFailedBooks([bookID]);
       }
       await this.saveSettings();
     }
