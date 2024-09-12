@@ -373,6 +373,7 @@ export default class ReadwisePlugin extends Plugin {
           if (bookID) {
             // handles case where user doesn't have `settings.refreshBooks` enabled
             await this.addToFailedBooks(bookID);
+            return;
           }
           // communicate with readwise?
         }
