@@ -373,6 +373,7 @@ export default class ReadwisePlugin extends Plugin {
           if (bookID) {
             // handles case where user doesn't have `settings.refreshBooks` enabled
             await this.addToFailedBooks(bookID);
+            await this.saveSettings();
             return;
           }
           // communicate with readwise?
@@ -500,7 +501,9 @@ export default class ReadwisePlugin extends Plugin {
     failedBooks.push(bookId);
     console.log(`Readwise Official plugin: added book id ${bookId} to failed books`);
     this.settings.failedBooks = failedBooks;
-    await this.saveSettings();
+
+    // don't forget to save after!
+    // but don't do that here; this allows batching when removing multiple books.
   }
 
   async addBookToRefresh(bookId: string) {
