@@ -11,6 +11,7 @@ import {
   Vault
 } from 'obsidian';
 import * as zip from "@zip.js/zip.js";
+import MD5 from "crypto-js/md5";
 import { StatusBar } from "./status";
 
 
@@ -279,6 +280,7 @@ export default class ReadwisePlugin extends Plugin {
     return {
       'AUTHORIZATION': `Token ${this.settings.token}`,
       'Obsidian-Client': `${this.getObsidianClientID()}`,
+      'Readwise-Client-Version': this.manifest.version,
     };
   }
 
@@ -320,8 +322,12 @@ export default class ReadwisePlugin extends Plugin {
         let bookID: string;
 
         /** Combo of file `readwiseDir`, book name, and book ID.
-         * Example: `Readwise/Books/Name of Book--12345678.md` */
-        const processedFileName = normalizePath(entry.filename.replace(/^Readwise/, this.settings.readwiseDir));
+         * Example: `Readwise/Books/Name of Book--12345678.json` */
+        const processedFileName = normalizePath(
+          entry.filename
+            .replace(/^Readwise/, this.settings.readwiseDir)
+            .replace(/\.json$/, ".md")
+        );
 
         // derive the original name `(readwiseDir + book name).md`
         let originalName = processedFileName;
@@ -358,13 +364,18 @@ export default class ReadwisePlugin extends Plugin {
             await this.fs.mkdir(dirPath);
           }
           // write the actual files
-          const contents = await entry.getData(new zip.TextWriter());
-          let contentToSave = contents;
+          const fileData = await entry.getData(new zip.TextWriter());
+          const data = JSON.parse(fileData);
+          let contentToSave = data.full_content;
 
           if (await this.fs.exists(originalName)) {
             // if the file already exists we need to append content to existing one
             const existingContent = await this.fs.read(originalName);
-            contentToSave = existingContent + contents;
+            const existingContentHash = MD5(existingContent).toString();
+            if (existingContentHash !== data.last_hash) {
+              // content has been modified (it differs from the previously exported full document)
+              contentToSave = existingContent.trimEnd() + "\n" + data.append_only_content;
+            }
           }
           await this.fs.write(originalName, contentToSave);
         } catch (e) {
