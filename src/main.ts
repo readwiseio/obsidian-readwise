@@ -318,8 +318,9 @@ export default class ReadwisePlugin extends Plugin {
     this.notice("Saving files...", false, 30);
     if (entries.length) {
       for (const entry of entries) {
-        // will be derived from the entry's filename
+        // will be extracted from JSON data
         let bookID: string;
+        let data: Record<string, any>;
 
         /** Combo of file `readwiseDir`, book name, and book ID.
          * Example: `Readwise/Books/Name of Book--12345678.json` */
@@ -335,28 +336,31 @@ export default class ReadwisePlugin extends Plugin {
         let split = processedFileName.split("--");
         if (split.length > 1) {
           originalName = split.slice(0, -1).join("--") + ".md";
-          bookID = split.last().match(/\d+/g)[0];
+        }
+        try {
+          const fileContent = await entry.getData(new zip.TextWriter());
+          data = JSON.parse(fileContent);
+
+          bookID = this.encodeReadwiseBookId(data.book_id) || this.encodeReaderDocumentId(data.reader_document_id);
 
           // track the book
           this.settings.booksIDsMap[originalName] = bookID;
-        }
 
-        try {
-          const undefinedBook = !bookID || !processedFileName;
-          const isReadwiseSyncFile = processedFileName === `${this.settings.readwiseDir}/${READWISE_SYNC_FILENAME}.md`;
-          if (undefinedBook && !isReadwiseSyncFile) {
-            throw new Error(`Book ID or file name not found for entry: ${entry.filename}`);
+          try {
+            const undefinedBook = !bookID || !processedFileName;
+            const isReadwiseSyncFile = processedFileName === `${this.settings.readwiseDir}/${READWISE_SYNC_FILENAME}.md`;
+            if (undefinedBook && !isReadwiseSyncFile) {
+              throw new Error(`Book ID or file name not found for entry: ${entry.filename}`);
+            }
+          } catch (e) {
+            console.error(`Error while processing entry: ${entry.filename}`);
           }
-        } catch (e) {
-          console.error(`Error while processing entry: ${entry.filename}`);
-        }
 
-        // save the entry in settings to ensure that it can be
-        // retried later when deleted files are re-synced if
-        // the user has `settings.refreshBooks` enabled
-        if (bookID) await this.saveSettings();
+          // save the entry in settings to ensure that it can be
+          // retried later when deleted files are re-synced if
+          // the user has `settings.refreshBooks` enabled
+          if (bookID) await this.saveSettings();
 
-        try {
           // ensure the directory exists
           let dirPath = processedFileName.replace(/\/*$/, '').replace(/^(.+)\/[^\/]*?$/, '$1');
           const exists = await this.fs.exists(dirPath);
@@ -364,8 +368,6 @@ export default class ReadwisePlugin extends Plugin {
             await this.fs.mkdir(dirPath);
           }
           // write the actual files
-          const fileData = await entry.getData(new zip.TextWriter());
-          const data = JSON.parse(fileData);
           let contentToSave = data.full_content;
 
           if (await this.fs.exists(originalName)) {
@@ -390,8 +392,10 @@ export default class ReadwisePlugin extends Plugin {
           // communicate with readwise?
         }
 
-        await this.removeBooksFromRefresh([bookID]);
-        await this.removeBookFromFailedBooks([bookID]);
+        if (data) {
+          await this.removeBooksFromRefresh([this.encodeReadwiseBookId(data.book_id), this.encodeReaderDocumentId(data.reader_document_id)]);
+          await this.removeBookFromFailedBooks([this.encodeReadwiseBookId(data.book_id), this.encodeReaderDocumentId(data.reader_document_id)]);
+        }
       }
       await this.saveSettings();
     }
@@ -479,6 +483,17 @@ export default class ReadwisePlugin extends Plugin {
 
     console.log('Readwise Official plugin: refreshing books', { targetBookIds });
 
+    let requestBookIds: string[] = [];
+    let requestReaderDocumentIds: string[] = [];
+    targetBookIds.map(id => {
+      const readerDocumentId = this.decodeReaderDocumentId(id);
+      if (readerDocumentId) {
+        requestReaderDocumentIds.push(readerDocumentId);
+      } else {
+        requestBookIds.push(id);
+      }
+    });
+
     try {
       const response = await fetch(
         // add books to next archive build from this endpoint
@@ -489,7 +504,11 @@ export default class ReadwisePlugin extends Plugin {
         {
           headers: { ...this.getAuthHeaders(), 'Content-Type': 'application/json' },
           method: "POST",
-          body: JSON.stringify({ exportTarget: 'obsidian', books: targetBookIds })
+          body: JSON.stringify({
+            exportTarget: 'obsidian',
+            books: requestBookIds,
+            readerDocuments: requestReaderDocumentIds,
+          })
         }
       );
 
@@ -762,6 +781,27 @@ export default class ReadwisePlugin extends Plugin {
     }
     await this.saveSettings();
     return true;
+  }
+
+  encodeReadwiseBookId(rawBookId?: string): string | undefined {
+    if (rawBookId) {
+      return rawBookId.toString()
+    }
+    return undefined;
+  }
+
+  encodeReaderDocumentId(rawReaderDocumentId?: string) : string | undefined {
+    if (rawReaderDocumentId) {
+      return `readerdocument:${rawReaderDocumentId}`;
+    }
+    return undefined;
+  }
+
+  decodeReaderDocumentId(readerDocumentId?: string) : string | undefined {
+    if (!readerDocumentId || !readerDocumentId.startsWith("readerdocument:")) {
+      return undefined;
+    }
+    return readerDocumentId.replace(/^readerdocument:/, "");
   }
 }
 
