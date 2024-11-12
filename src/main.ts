@@ -11,7 +11,7 @@ import {
   Vault
 } from 'obsidian';
 import * as zip from "@zip.js/zip.js";
-import MD5 from "crypto-js/md5";
+import { Md5 } from "ts-md5";
 import { StatusBar } from "./status";
 
 
@@ -322,21 +322,14 @@ export default class ReadwisePlugin extends Plugin {
         let bookID: string;
         let data: Record<string, any>;
 
-        /** Combo of file `readwiseDir`, book name, and book ID.
-         * Example: `Readwise/Books/Name of Book--12345678.json` */
+        /** Combo of file `readwiseDir` and book name.
+         * Example: `Readwise/Books/Name of Book.json` */
         const processedFileName = normalizePath(
           entry.filename
             .replace(/^Readwise/, this.settings.readwiseDir)
             .replace(/\.json$/, ".md")
         );
 
-        // derive the original name `(readwiseDir + book name).md`
-        let originalName = processedFileName;
-        // extracting book ID from file name
-        let split = processedFileName.split("--");
-        if (split.length > 1) {
-          originalName = split.slice(0, -1).join("--") + ".md";
-        }
         try {
           const fileContent = await entry.getData(new zip.TextWriter());
           data = JSON.parse(fileContent);
@@ -344,7 +337,7 @@ export default class ReadwisePlugin extends Plugin {
           bookID = this.encodeReadwiseBookId(data.book_id) || this.encodeReaderDocumentId(data.reader_document_id);
 
           // track the book
-          this.settings.booksIDsMap[originalName] = bookID;
+          this.settings.booksIDsMap[processedFileName] = bookID;
 
           try {
             const undefinedBook = !bookID || !processedFileName;
@@ -370,16 +363,16 @@ export default class ReadwisePlugin extends Plugin {
           // write the actual files
           let contentToSave = data.full_content;
 
-          if (await this.fs.exists(originalName)) {
+          if (await this.fs.exists(processedFileName)) {
             // if the file already exists we need to append content to existing one
-            const existingContent = await this.fs.read(originalName);
-            const existingContentHash = MD5(existingContent).toString();
+            const existingContent = await this.fs.read(processedFileName);
+            const existingContentHash = Md5.hashStr(existingContent).toString();
             if (existingContentHash !== data.last_hash) {
               // content has been modified (it differs from the previously exported full document)
               contentToSave = existingContent.trimEnd() + "\n" + data.append_only_content;
             }
           }
-          await this.fs.write(originalName, contentToSave);
+          await this.fs.write(processedFileName, contentToSave);
         } catch (e) {
           console.log(`Readwise Official plugin: error writing ${processedFileName}:`, e);
           this.notice(`Readwise: error while writing ${processedFileName}: ${e}`, true, 4, true);
@@ -506,8 +499,8 @@ export default class ReadwisePlugin extends Plugin {
           method: "POST",
           body: JSON.stringify({
             exportTarget: 'obsidian',
-            books: requestBookIds,
-            readerDocuments: requestReaderDocumentIds,
+            userBookIds: requestBookIds,
+            readerDocumentIds: requestReaderDocumentIds,
           })
         }
       );
