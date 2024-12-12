@@ -32,6 +32,7 @@ interface ExportStatusResponse {
   booksExported: number,
   isFinished: boolean,
   taskStatus: string,
+  artifactIds: number[],
 }
 
 interface ReadwisePluginSettings {
@@ -144,7 +145,22 @@ export default class ReadwisePlugin extends Plugin {
 
   /** Polls the Readwise API for the status of a given export;
    * uses recursion for polling so that it can be awaited. */
-  async getExportStatus(statusID: number, buttonContext?: ButtonComponent) {
+  async getExportStatus(statusID: number, buttonContext?: ButtonComponent, _processedArtifactIds?: Set<number>) {
+    if (statusID <= this.settings.lastSavedStatusID) {
+      console.log(`Readwise Official plugin: Already saved data from export ${statusID}`);
+      await this.handleSyncSuccess(buttonContext);
+      this.notice("Readwise data is already up to date", false, 4);
+      return;
+    }
+    const processedArtifactIds = _processedArtifactIds ?? new Set();
+    const downloadUnprocessedArtifacts = async (allArtifactIds: number[]) => {
+      for (const artifactId of allArtifactIds) {
+        if (!processedArtifactIds.has(artifactId)) {
+          await this.downloadArtifact(artifactId, buttonContext);
+          processedArtifactIds.add(artifactId);
+        }
+      }
+    };
     try {
       const response = await fetch(
         // status of archive build from this endpoint
@@ -167,13 +183,24 @@ export default class ReadwisePlugin extends Plugin {
           } else {
             this.notice("Building export...");
           }
-
+          // process any artifacts available while the export is still being generated
+          await downloadUnprocessedArtifacts(data.artifactIds);
           // wait 1 second
           await new Promise(resolve => setTimeout(resolve, 1000));
           // then keep polling
-          await this.getExportStatus(statusID, buttonContext);
+          await this.getExportStatus(statusID, buttonContext, processedArtifactIds);
         } else if (SUCCESS_STATUSES.includes(data.taskStatus)) {
-          await this.downloadExport(statusID, buttonContext);
+          // make sure all artifacts are processed
+          await downloadUnprocessedArtifacts(data.artifactIds);
+
+          await this.acknowledgeSyncCompleted(buttonContext);
+          await this.handleSyncSuccess(buttonContext, "Synced!", statusID);
+          this.notice("Readwise sync completed", true, 1, true);
+          console.log("Readwise Official plugin: completed sync");
+          // @ts-ignore
+          if (this.app.isMobile) {
+            this.notice("If you don't see all of your readwise files reload obsidian app", true,);
+          }
         } else {
           console.log("Readwise Official plugin: unknown status in getExportStatus: ", data);
           await this.handleSyncError(buttonContext, "Sync failed");
@@ -284,15 +311,9 @@ export default class ReadwisePlugin extends Plugin {
     };
   }
 
-  async downloadExport(exportID: number, buttonContext: ButtonComponent): Promise<void> {
+  async downloadArtifact(artifactId: number, buttonContext: ButtonComponent): Promise<void> {
     // download archive from this endpoint
-    let artifactURL = `${baseURL}/api/download_artifact/${exportID}`;
-    if (exportID <= this.settings.lastSavedStatusID) {
-      console.log(`Readwise Official plugin: Already saved data from export ${exportID}`);
-      await this.handleSyncSuccess(buttonContext);
-      this.notice("Readwise data is already up to date", false, 4);
-      return;
-    }
+    let artifactURL = `${baseURL}/api/v2/download_artifact/${artifactId}`;
 
     let response, blob;
     try {
@@ -360,9 +381,9 @@ export default class ReadwisePlugin extends Plugin {
           if (!exists) {
             await this.fs.mkdir(dirPath);
           }
+
           // write the actual files
           let contentToSave = data.full_content;
-
           if (await this.fs.exists(processedFileName)) {
             // if the file already exists we need to append content to existing one
             const existingContent = await this.fs.read(processedFileName);
@@ -380,9 +401,9 @@ export default class ReadwisePlugin extends Plugin {
             // handles case where user doesn't have `settings.refreshBooks` enabled
             await this.addToFailedBooks(bookID);
             await this.saveSettings();
-            return;
           }
           // communicate with readwise?
+          throw new Error(`Readwise: error while processing artifact ${artifactId}`);
         }
 
         if (data) {
@@ -394,14 +415,6 @@ export default class ReadwisePlugin extends Plugin {
     }
     // close the ZipReader
     await zipReader.close();
-    await this.acknowledgeSyncCompleted(buttonContext);
-    await this.handleSyncSuccess(buttonContext, "Synced!", exportID);
-    this.notice("Readwise sync completed", true, 1, true);
-    console.log("Readwise Official plugin: completed sync");
-    // @ts-ignore
-    if (this.app.isMobile) {
-      this.notice("If you don't see all of your readwise files reload obsidian app", true,);
-    }
   }
 
   async acknowledgeSyncCompleted(buttonContext: ButtonComponent) {
