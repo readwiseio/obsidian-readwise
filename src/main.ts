@@ -199,7 +199,8 @@ export default class ReadwisePlugin extends Plugin {
           console.log("Readwise Official plugin: completed sync");
           // @ts-ignore
           if (this.app.isMobile) {
-            this.notice("If you don't see all of your readwise files reload obsidian app", true,);
+            this.notice("If you don't see all of your Readwise files, please reload the Obsidian app", true,);
+
           }
         } else {
           console.log("Readwise Official plugin: unknown status in getExportStatus: ", data);
