@@ -328,7 +328,7 @@ export default class ReadwisePlugin extends Plugin {
     } else {
       console.log("Readwise Official plugin: bad response in downloadExport: ", response);
       await this.handleSyncError(buttonContext, this.getErrorMessageFromResponse(response));
-      return;
+      throw new Error(`Readwise: error while fetching artifact ${artifactId}`);
     }
 
     this.fs = this.app.vault.adapter;
