@@ -351,10 +351,17 @@ export default class ReadwisePlugin extends Plugin {
             .replace(/^Readwise/, this.settings.readwiseDir)
             .replace(/\.json$/, ".md")
         );
+        const isReadwiseSyncFile = processedFileName === `${this.settings.readwiseDir}/${READWISE_SYNC_FILENAME}.md`;
 
         try {
           const fileContent = await entry.getData(new zip.TextWriter());
-          data = JSON.parse(fileContent);
+          if (isReadwiseSyncFile) {
+            data = {
+              append_only_content: fileContent,
+            };
+          } else {
+            data = JSON.parse(fileContent);
+          }
 
           bookID = this.encodeReadwiseBookId(data.book_id) || this.encodeReaderDocumentId(data.reader_document_id);
 
@@ -363,7 +370,6 @@ export default class ReadwisePlugin extends Plugin {
 
           try {
             const undefinedBook = !bookID || !processedFileName;
-            const isReadwiseSyncFile = processedFileName === `${this.settings.readwiseDir}/${READWISE_SYNC_FILENAME}.md`;
             if (undefinedBook && !isReadwiseSyncFile) {
               throw new Error(`Book ID or file name not found for entry: ${entry.filename}`);
             }
@@ -384,7 +390,7 @@ export default class ReadwisePlugin extends Plugin {
           }
 
           // write the actual files
-          let contentToSave = data.full_content;
+          let contentToSave = data.full_content ?? data.append_only_content;
           if (await this.fs.exists(processedFileName)) {
             // if the file already exists we need to append content to existing one
             const existingContent = await this.fs.read(processedFileName);
