@@ -179,7 +179,7 @@ export default class ReadwisePlugin extends Plugin {
         if (WAITING_STATUSES.includes(data.taskStatus)) {
           if (data.booksExported) {
             const progressMsg = `Exporting Readwise data (${data.booksExported} / ${data.totalBooks}) ...`;
-            this.notice(progressMsg);
+            this.notice(progressMsg, false, 35, true);
           } else {
             this.notice("Building export...");
           }
@@ -337,7 +337,6 @@ export default class ReadwisePlugin extends Plugin {
     const blobReader = new zip.BlobReader(blob);
     const zipReader = new zip.ZipReader(blobReader);
     const entries = await zipReader.getEntries();
-    this.notice("Saving files...", false, 30);
     if (entries.length) {
       for (const entry of entries) {
         // will be extracted from JSON data
@@ -422,6 +421,22 @@ export default class ReadwisePlugin extends Plugin {
     }
     // close the ZipReader
     await zipReader.close();
+
+    // wait for the metadata cache to process created/updated documents
+    await new Promise<void>((resolve) => {
+      const timeoutSeconds = 30;
+      console.log(`Readwise Official plugin: waiting for metadata cache processing for up to ${timeoutSeconds}s...`)
+      const timeout = setTimeout(() => {
+          console.log("Readwise Official plugin: metadata cache processing timeout reached.");
+          resolve();
+      }, timeoutSeconds * 1000);
+
+      this.app.metadataCache.on("resolved", () => {
+          clearTimeout(timeout);
+          console.log("Readwise Official plugin: metadata cache processing has finished.");
+          resolve();
+      });
+    });
   }
 
   async acknowledgeSyncCompleted(buttonContext: ButtonComponent) {
