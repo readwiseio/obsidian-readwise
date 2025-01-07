@@ -362,7 +362,7 @@ export default class ReadwisePlugin extends Plugin {
             data = JSON.parse(fileContent);
           }
 
-          bookID = this.encodeReadwiseBookId(data.book_id) || this.encodeReaderDocumentId(data.reader_document_id);
+          bookID = this.encodeReadwiseBookId(data.book_id);
 
           // track the book
           this.settings.booksIDsMap[processedFileName] = bookID;
@@ -413,8 +413,8 @@ export default class ReadwisePlugin extends Plugin {
         }
 
         if (data) {
-          await this.removeBooksFromRefresh([this.encodeReadwiseBookId(data.book_id), this.encodeReaderDocumentId(data.reader_document_id)]);
-          await this.removeBookFromFailedBooks([this.encodeReadwiseBookId(data.book_id), this.encodeReaderDocumentId(data.reader_document_id)]);
+          await this.removeBooksFromRefresh([this.encodeReadwiseBookId(data.book_id)]);
+          await this.removeBookFromFailedBooks([this.encodeReadwiseBookId(data.book_id)]);
         }
       }
       await this.saveSettings();
@@ -511,17 +511,6 @@ export default class ReadwisePlugin extends Plugin {
 
     console.log('Readwise Official plugin: refreshing books', { targetBookIds });
 
-    let requestBookIds: string[] = [];
-    let requestReaderDocumentIds: string[] = [];
-    targetBookIds.map(id => {
-      const readerDocumentId = this.decodeReaderDocumentId(id);
-      if (readerDocumentId) {
-        requestReaderDocumentIds.push(readerDocumentId);
-      } else {
-        requestBookIds.push(id);
-      }
-    });
-
     try {
       const response = await fetch(
         // add books to next archive build from this endpoint
@@ -534,8 +523,7 @@ export default class ReadwisePlugin extends Plugin {
           method: "POST",
           body: JSON.stringify({
             exportTarget: 'obsidian',
-            userBookIds: requestBookIds,
-            readerDocumentIds: requestReaderDocumentIds,
+            userBookIds: targetBookIds,
           })
         }
       );
@@ -570,7 +558,7 @@ export default class ReadwisePlugin extends Plugin {
   async addBookToRefresh(bookId: string) {
     let booksToRefresh = [...this.settings.booksToRefresh];
     booksToRefresh.push(bookId);
-    console.log(`Readwise Official plugin: added book id ${bookId} to failed books`);
+    console.log(`Readwise Official plugin: added book id ${bookId} to refresh list`);
     this.settings.booksToRefresh = booksToRefresh;
     await this.saveSettings();
   }
@@ -816,20 +804,6 @@ export default class ReadwisePlugin extends Plugin {
       return rawBookId.toString()
     }
     return undefined;
-  }
-
-  encodeReaderDocumentId(rawReaderDocumentId?: string) : string | undefined {
-    if (rawReaderDocumentId) {
-      return `readerdocument:${rawReaderDocumentId}`;
-    }
-    return undefined;
-  }
-
-  decodeReaderDocumentId(readerDocumentId?: string) : string | undefined {
-    if (!readerDocumentId || !readerDocumentId.startsWith("readerdocument:")) {
-      return undefined;
-    }
-    return readerDocumentId.replace(/^readerdocument:/, "");
   }
 }
 
