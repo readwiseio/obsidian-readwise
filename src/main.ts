@@ -14,6 +14,8 @@ import * as zip from "@zip.js/zip.js";
 import { Md5 } from "ts-md5";
 import { StatusBar } from "./status";
 
+// keep pluginVersion in sync with manifest.json
+const pluginVersion = "3.0.0";
 
 // switch to local dev server for development
 const baseURL = "https://readwise.io";
@@ -308,7 +310,7 @@ export default class ReadwisePlugin extends Plugin {
     return {
       'AUTHORIZATION': `Token ${this.settings.token}`,
       'Obsidian-Client': `${this.getObsidianClientID()}`,
-      'Readwise-Client-Version': this.manifest.version,
+      'Readwise-Client-Version': pluginVersion,
     };
   }
 
@@ -364,42 +366,62 @@ export default class ReadwisePlugin extends Plugin {
 
           bookID = this.encodeReadwiseBookId(data.book_id) || this.encodeReaderDocumentId(data.reader_document_id);
 
-          // track the book
-          this.settings.booksIDsMap[processedFileName] = bookID;
-
-          try {
-            const undefinedBook = !bookID || !processedFileName;
-            if (undefinedBook && !isReadwiseSyncFile) {
-              throw new Error(`Book ID or file name not found for entry: ${entry.filename}`);
-            }
-          } catch (e) {
+          const undefinedBook = !bookID || !processedFileName;
+          if (undefinedBook && !isReadwiseSyncFile) {
             console.error(`Error while processing entry: ${entry.filename}`);
+          }
+
+          // write the full document text file
+          let isFullDocumentTextFileCreated = false;
+          if (data.full_document_text && data.full_document_text_path) {
+            const processedFullDocumentTextFileName = data.full_document_text_path.replace(/^Readwise/, this.settings.readwiseDir);
+            console.log("Writing full document text", processedFullDocumentTextFileName);
+            // track the book
+            this.settings.booksIDsMap[processedFullDocumentTextFileName] = bookID;
+            // ensure the directory exists
+            await this.createDirForFile(processedFullDocumentTextFileName);
+            if (!await this.fs.exists(processedFullDocumentTextFileName)) {
+              // it's a new full document content file, just save it
+              await this.fs.write(processedFullDocumentTextFileName, data.full_document_text);
+              isFullDocumentTextFileCreated = true;
+            } else {
+              // full document content file already exists — overwrite it if it wasn't edited locally
+              const existingFullDocument = await this.fs.read(processedFullDocumentTextFileName);
+              const existingFullDocumentHash = Md5.hashStr(existingFullDocument).toString();
+              if (existingFullDocumentHash === data.last_full_document_hash) {
+                await this.fs.write(processedFullDocumentTextFileName, data.full_document_text);
+              }
+            }
+          }
+
+          // write the actual files
+          let contentToSave = data.full_content ?? data.append_only_content;
+          if (contentToSave) {
+            // track the book
+            this.settings.booksIDsMap[processedFileName] = bookID;
+            // ensure the directory exists
+            await this.createDirForFile(processedFileName);
+            if (await this.fs.exists(processedFileName)) {
+              // if the file already exists we need to append content to existing one
+              const existingContent = await this.fs.read(processedFileName);
+              const existingContentHash = Md5.hashStr(existingContent).toString();
+              if (isFullDocumentTextFileCreated) {
+                // full document content has just been created but the highlights file exists
+                // this means someone just wanted to resync full document content file alone
+                // leave the existing content — otherwise we'd append all highlights once again!
+                contentToSave = existingContent;
+              } else if (existingContentHash !== data.last_content_hash) {
+                // content has been modified (it differs from the previously exported full document)
+                contentToSave = existingContent.trimEnd() + "\n" + data.append_only_content;
+              }
+            }
+            await this.fs.write(processedFileName, contentToSave);
           }
 
           // save the entry in settings to ensure that it can be
           // retried later when deleted files are re-synced if
           // the user has `settings.refreshBooks` enabled
           if (bookID) await this.saveSettings();
-
-          // ensure the directory exists
-          let dirPath = processedFileName.replace(/\/*$/, '').replace(/^(.+)\/[^\/]*?$/, '$1');
-          const exists = await this.fs.exists(dirPath);
-          if (!exists) {
-            await this.fs.mkdir(dirPath);
-          }
-
-          // write the actual files
-          let contentToSave = data.full_content ?? data.append_only_content;
-          if (await this.fs.exists(processedFileName)) {
-            // if the file already exists we need to append content to existing one
-            const existingContent = await this.fs.read(processedFileName);
-            const existingContentHash = Md5.hashStr(existingContent).toString();
-            if (existingContentHash !== data.last_hash) {
-              // content has been modified (it differs from the previously exported full document)
-              contentToSave = existingContent.trimEnd() + "\n" + data.append_only_content;
-            }
-          }
-          await this.fs.write(processedFileName, contentToSave);
         } catch (e) {
           console.log(`Readwise Official plugin: error writing ${processedFileName}:`, e);
           this.notice(`Readwise: error while writing ${processedFileName}: ${e}`, true, 4, true);
@@ -424,17 +446,19 @@ export default class ReadwisePlugin extends Plugin {
 
     // wait for the metadata cache to process created/updated documents
     await new Promise<void>((resolve) => {
-      const timeoutSeconds = 30;
+      const timeoutSeconds = 15;
       console.log(`Readwise Official plugin: waiting for metadata cache processing for up to ${timeoutSeconds}s...`)
       const timeout = setTimeout(() => {
-          console.log("Readwise Official plugin: metadata cache processing timeout reached.");
-          resolve();
+        this.app.metadataCache.offref(eventRef);
+        console.log("Readwise Official plugin: metadata cache processing timeout reached.");
+        resolve();
       }, timeoutSeconds * 1000);
 
-      this.app.metadataCache.on("resolved", () => {
-          clearTimeout(timeout);
-          console.log("Readwise Official plugin: metadata cache processing has finished.");
-          resolve();
+      const eventRef = this.app.metadataCache.on("resolved", () => {
+        this.app.metadataCache.offref(eventRef);
+        clearTimeout(timeout);
+        console.log("Readwise Official plugin: metadata cache processing has finished.");
+        resolve();
       });
     });
   }
@@ -570,7 +594,7 @@ export default class ReadwisePlugin extends Plugin {
   async addBookToRefresh(bookId: string) {
     let booksToRefresh = [...this.settings.booksToRefresh];
     booksToRefresh.push(bookId);
-    console.log(`Readwise Official plugin: added book id ${bookId} to failed books`);
+    console.log(`Readwise Official plugin: added book id ${bookId} to refresh list`);
     this.settings.booksToRefresh = booksToRefresh;
     await this.saveSettings();
   }
@@ -607,6 +631,14 @@ export default class ReadwisePlugin extends Plugin {
       await this.syncBookHighlights([bookId]);
     } catch (e) {
       console.log("Readwise Official plugin: fetch failed in Reimport current file: ", e);
+    }
+  }
+
+  async createDirForFile(filePath: string) {
+    const dirPath = filePath.replace(/\/*$/, '').replace(/^(.+)\/[^\/]*?$/, '$1');
+    const exists = await this.fs.exists(dirPath);
+    if (!exists) {
+      await this.fs.mkdir(dirPath);
     }
   }
 
