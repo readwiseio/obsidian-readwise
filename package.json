@@ -1,6 +1,6 @@
 {
   "name": "readwise-official",
-  "version": "2.1.4",
+  "version": "3.0.0",
   "description": "Automatically syncs your Readwise highlights with Obsidian.",
   "main": "main.js",
   "scripts": {
