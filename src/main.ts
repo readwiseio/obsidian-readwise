@@ -11,8 +11,11 @@ import {
   Vault
 } from 'obsidian';
 import * as zip from "@zip.js/zip.js";
+import { Md5 } from "ts-md5";
 import { StatusBar } from "./status";
 
+// keep pluginVersion in sync with manifest.json
+const pluginVersion = "3.0.0";
 
 // switch to local dev server for development
 const baseURL = "https://readwise.io";
@@ -31,6 +34,7 @@ interface ExportStatusResponse {
   booksExported: number,
   isFinished: boolean,
   taskStatus: string,
+  artifactIds: number[],
 }
 
 interface ReadwisePluginSettings {
@@ -143,7 +147,22 @@ export default class ReadwisePlugin extends Plugin {
 
   /** Polls the Readwise API for the status of a given export;
    * uses recursion for polling so that it can be awaited. */
-  async getExportStatus(statusID: number, buttonContext?: ButtonComponent) {
+  async getExportStatus(statusID: number, buttonContext?: ButtonComponent, _processedArtifactIds?: Set<number>) {
+    if (statusID <= this.settings.lastSavedStatusID) {
+      console.log(`Readwise Official plugin: Already saved data from export ${statusID}`);
+      await this.handleSyncSuccess(buttonContext);
+      this.notice("Readwise data is already up to date", false, 4);
+      return;
+    }
+    const processedArtifactIds = _processedArtifactIds ?? new Set();
+    const downloadUnprocessedArtifacts = async (allArtifactIds: number[]) => {
+      for (const artifactId of allArtifactIds) {
+        if (!processedArtifactIds.has(artifactId)) {
+          await this.downloadArtifact(artifactId, buttonContext);
+          processedArtifactIds.add(artifactId);
+        }
+      }
+    };
     try {
       const response = await fetch(
         // status of archive build from this endpoint
@@ -162,17 +181,29 @@ export default class ReadwisePlugin extends Plugin {
         if (WAITING_STATUSES.includes(data.taskStatus)) {
           if (data.booksExported) {
             const progressMsg = `Exporting Readwise data (${data.booksExported} / ${data.totalBooks}) ...`;
-            this.notice(progressMsg);
+            this.notice(progressMsg, false, 35, true);
           } else {
             this.notice("Building export...");
           }
-
+          // process any artifacts available while the export is still being generated
+          await downloadUnprocessedArtifacts(data.artifactIds);
           // wait 1 second
           await new Promise(resolve => setTimeout(resolve, 1000));
           // then keep polling
-          await this.getExportStatus(statusID, buttonContext);
+          await this.getExportStatus(statusID, buttonContext, processedArtifactIds);
         } else if (SUCCESS_STATUSES.includes(data.taskStatus)) {
-          await this.downloadExport(statusID, buttonContext);
+          // make sure all artifacts are processed
+          await downloadUnprocessedArtifacts(data.artifactIds);
+
+          await this.acknowledgeSyncCompleted(buttonContext);
+          await this.handleSyncSuccess(buttonContext, "Synced!", statusID);
+          this.notice("Readwise sync completed", true, 1, true);
+          console.log("Readwise Official plugin: completed sync");
+          // @ts-ignore
+          if (this.app.isMobile) {
+            this.notice("If you don't see all of your Readwise files, please reload the Obsidian app", true,);
+
+          }
         } else {
           console.log("Readwise Official plugin: unknown status in getExportStatus: ", data);
           await this.handleSyncError(buttonContext, "Sync failed");
@@ -279,18 +310,13 @@ export default class ReadwisePlugin extends Plugin {
     return {
       'AUTHORIZATION': `Token ${this.settings.token}`,
       'Obsidian-Client': `${this.getObsidianClientID()}`,
+      'Readwise-Client-Version': pluginVersion,
     };
   }
 
-  async downloadExport(exportID: number, buttonContext: ButtonComponent): Promise<void> {
+  async downloadArtifact(artifactId: number, buttonContext: ButtonComponent): Promise<void> {
     // download archive from this endpoint
-    let artifactURL = `${baseURL}/api/download_artifact/${exportID}`;
-    if (exportID <= this.settings.lastSavedStatusID) {
-      console.log(`Readwise Official plugin: Already saved data from export ${exportID}`);
-      await this.handleSyncSuccess(buttonContext);
-      this.notice("Readwise data is already up to date", false, 4);
-      return;
-    }
+    let artifactURL = `${baseURL}/api/v2/download_artifact/${artifactId}`;
 
     let response, blob;
     try {
@@ -305,7 +331,7 @@ export default class ReadwisePlugin extends Plugin {
     } else {
       console.log("Readwise Official plugin: bad response in downloadExport: ", response);
       await this.handleSyncError(buttonContext, this.getErrorMessageFromResponse(response));
-      return;
+      throw new Error(`Readwise: error while fetching artifact ${artifactId}`);
     }
 
     this.fs = this.app.vault.adapter;
@@ -313,60 +339,89 @@ export default class ReadwisePlugin extends Plugin {
     const blobReader = new zip.BlobReader(blob);
     const zipReader = new zip.ZipReader(blobReader);
     const entries = await zipReader.getEntries();
-    this.notice("Saving files...", false, 30);
     if (entries.length) {
       for (const entry of entries) {
-        // will be derived from the entry's filename
+        // will be extracted from JSON data
         let bookID: string;
+        let data: Record<string, any>;
 
-        /** Combo of file `readwiseDir`, book name, and book ID.
-         * Example: `Readwise/Books/Name of Book--12345678.md` */
-        const processedFileName = normalizePath(entry.filename.replace(/^Readwise/, this.settings.readwiseDir));
-
-        // derive the original name `(readwiseDir + book name).md`
-        let originalName = processedFileName;
-        // extracting book ID from file name
-        let split = processedFileName.split("--");
-        if (split.length > 1) {
-          originalName = split.slice(0, -1).join("--") + ".md";
-          bookID = split.last().match(/\d+/g)[0];
-
-          // track the book
-          this.settings.booksIDsMap[originalName] = bookID;
-        }
+        /** Combo of file `readwiseDir` and book name.
+         * Example: `Readwise/Books/Name of Book.json` */
+        const processedFileName = normalizePath(
+          entry.filename
+            .replace(/^Readwise/, this.settings.readwiseDir)
+            .replace(/\.json$/, ".md")
+        );
+        const isReadwiseSyncFile = processedFileName === `${this.settings.readwiseDir}/${READWISE_SYNC_FILENAME}.md`;
 
         try {
+          const fileContent = await entry.getData(new zip.TextWriter());
+          if (isReadwiseSyncFile) {
+            data = {
+              append_only_content: fileContent,
+            };
+          } else {
+            data = JSON.parse(fileContent);
+          }
+
+          bookID = this.encodeReadwiseBookId(data.book_id) || this.encodeReaderDocumentId(data.reader_document_id);
+
           const undefinedBook = !bookID || !processedFileName;
-          const isReadwiseSyncFile = processedFileName === `${this.settings.readwiseDir}/${READWISE_SYNC_FILENAME}.md`;
           if (undefinedBook && !isReadwiseSyncFile) {
-            throw new Error(`Book ID or file name not found for entry: ${entry.filename}`);
+            console.error(`Error while processing entry: ${entry.filename}`);
           }
-        } catch (e) {
-          console.error(`Error while processing entry: ${entry.filename}`);
-        }
 
-        // save the entry in settings to ensure that it can be
-        // retried later when deleted files are re-synced if
-        // the user has `settings.refreshBooks` enabled
-        if (bookID) await this.saveSettings();
-
-        try {
-          // ensure the directory exists
-          let dirPath = processedFileName.replace(/\/*$/, '').replace(/^(.+)\/[^\/]*?$/, '$1');
-          const exists = await this.fs.exists(dirPath);
-          if (!exists) {
-            await this.fs.mkdir(dirPath);
+          // write the full document text file
+          let isFullDocumentTextFileCreated = false;
+          if (data.full_document_text && data.full_document_text_path) {
+            const processedFullDocumentTextFileName = data.full_document_text_path.replace(/^Readwise/, this.settings.readwiseDir);
+            console.log("Writing full document text", processedFullDocumentTextFileName);
+            // track the book
+            this.settings.booksIDsMap[processedFullDocumentTextFileName] = bookID;
+            // ensure the directory exists
+            await this.createDirForFile(processedFullDocumentTextFileName);
+            if (!await this.fs.exists(processedFullDocumentTextFileName)) {
+              // it's a new full document content file, just save it
+              await this.fs.write(processedFullDocumentTextFileName, data.full_document_text);
+              isFullDocumentTextFileCreated = true;
+            } else {
+              // full document content file already exists — overwrite it if it wasn't edited locally
+              const existingFullDocument = await this.fs.read(processedFullDocumentTextFileName);
+              const existingFullDocumentHash = Md5.hashStr(existingFullDocument).toString();
+              if (existingFullDocumentHash === data.last_full_document_hash) {
+                await this.fs.write(processedFullDocumentTextFileName, data.full_document_text);
+              }
+            }
           }
+
           // write the actual files
-          const contents = await entry.getData(new zip.TextWriter());
-          let contentToSave = contents;
-
-          if (await this.fs.exists(originalName)) {
-            // if the file already exists we need to append content to existing one
-            const existingContent = await this.fs.read(originalName);
-            contentToSave = existingContent + contents;
+          let contentToSave = data.full_content ?? data.append_only_content;
+          if (contentToSave) {
+            // track the book
+            this.settings.booksIDsMap[processedFileName] = bookID;
+            // ensure the directory exists
+            await this.createDirForFile(processedFileName);
+            if (await this.fs.exists(processedFileName)) {
+              // if the file already exists we need to append content to existing one
+              const existingContent = await this.fs.read(processedFileName);
+              const existingContentHash = Md5.hashStr(existingContent).toString();
+              if (isFullDocumentTextFileCreated) {
+                // full document content has just been created but the highlights file exists
+                // this means someone just wanted to resync full document content file alone
+                // leave the existing content — otherwise we'd append all highlights once again!
+                contentToSave = existingContent;
+              } else if (existingContentHash !== data.last_content_hash) {
+                // content has been modified (it differs from the previously exported full document)
+                contentToSave = existingContent.trimEnd() + "\n" + data.append_only_content;
+              }
+            }
+            await this.fs.write(processedFileName, contentToSave);
           }
-          await this.fs.write(originalName, contentToSave);
+
+          // save the entry in settings to ensure that it can be
+          // retried later when deleted files are re-synced if
+          // the user has `settings.refreshBooks` enabled
+          if (bookID) await this.saveSettings();
         } catch (e) {
           console.log(`Readwise Official plugin: error writing ${processedFileName}:`, e);
           this.notice(`Readwise: error while writing ${processedFileName}: ${e}`, true, 4, true);
@@ -374,26 +429,38 @@ export default class ReadwisePlugin extends Plugin {
             // handles case where user doesn't have `settings.refreshBooks` enabled
             await this.addToFailedBooks(bookID);
             await this.saveSettings();
-            return;
           }
           // communicate with readwise?
+          throw new Error(`Readwise: error while processing artifact ${artifactId}`);
         }
 
-        await this.removeBooksFromRefresh([bookID]);
-        await this.removeBookFromFailedBooks([bookID]);
+        if (data) {
+          await this.removeBooksFromRefresh([this.encodeReadwiseBookId(data.book_id), this.encodeReaderDocumentId(data.reader_document_id)]);
+          await this.removeBookFromFailedBooks([this.encodeReadwiseBookId(data.book_id), this.encodeReaderDocumentId(data.reader_document_id)]);
+        }
       }
       await this.saveSettings();
     }
     // close the ZipReader
     await zipReader.close();
-    await this.acknowledgeSyncCompleted(buttonContext);
-    await this.handleSyncSuccess(buttonContext, "Synced!", exportID);
-    this.notice("Readwise sync completed", true, 1, true);
-    console.log("Readwise Official plugin: completed sync");
-    // @ts-ignore
-    if (this.app.isMobile) {
-      this.notice("If you don't see all of your readwise files reload obsidian app", true,);
-    }
+
+    // wait for the metadata cache to process created/updated documents
+    await new Promise<void>((resolve) => {
+      const timeoutSeconds = 15;
+      console.log(`Readwise Official plugin: waiting for metadata cache processing for up to ${timeoutSeconds}s...`)
+      const timeout = setTimeout(() => {
+        this.app.metadataCache.offref(eventRef);
+        console.log("Readwise Official plugin: metadata cache processing timeout reached.");
+        resolve();
+      }, timeoutSeconds * 1000);
+
+      const eventRef = this.app.metadataCache.on("resolved", () => {
+        this.app.metadataCache.offref(eventRef);
+        clearTimeout(timeout);
+        console.log("Readwise Official plugin: metadata cache processing has finished.");
+        resolve();
+      });
+    });
   }
 
   async acknowledgeSyncCompleted(buttonContext: ButtonComponent) {
@@ -468,6 +535,17 @@ export default class ReadwisePlugin extends Plugin {
 
     console.log('Readwise Official plugin: refreshing books', { targetBookIds });
 
+    let requestBookIds: string[] = [];
+    let requestReaderDocumentIds: string[] = [];
+    targetBookIds.map(id => {
+      const readerDocumentId = this.decodeReaderDocumentId(id);
+      if (readerDocumentId) {
+        requestReaderDocumentIds.push(readerDocumentId);
+      } else {
+        requestBookIds.push(id);
+      }
+    });
+
     try {
       const response = await fetch(
         // add books to next archive build from this endpoint
@@ -478,7 +556,11 @@ export default class ReadwisePlugin extends Plugin {
         {
           headers: { ...this.getAuthHeaders(), 'Content-Type': 'application/json' },
           method: "POST",
-          body: JSON.stringify({ exportTarget: 'obsidian', books: targetBookIds })
+          body: JSON.stringify({
+            exportTarget: 'obsidian',
+            userBookIds: requestBookIds,
+            readerDocumentIds: requestReaderDocumentIds,
+          })
         }
       );
 
@@ -512,7 +594,7 @@ export default class ReadwisePlugin extends Plugin {
   async addBookToRefresh(bookId: string) {
     let booksToRefresh = [...this.settings.booksToRefresh];
     booksToRefresh.push(bookId);
-    console.log(`Readwise Official plugin: added book id ${bookId} to failed books`);
+    console.log(`Readwise Official plugin: added book id ${bookId} to refresh list`);
     this.settings.booksToRefresh = booksToRefresh;
     await this.saveSettings();
   }
@@ -549,6 +631,14 @@ export default class ReadwisePlugin extends Plugin {
       await this.syncBookHighlights([bookId]);
     } catch (e) {
       console.log("Readwise Official plugin: fetch failed in Reimport current file: ", e);
+    }
+  }
+
+  async createDirForFile(filePath: string) {
+    const dirPath = filePath.replace(/\/*$/, '').replace(/^(.+)\/[^\/]*?$/, '$1');
+    const exists = await this.fs.exists(dirPath);
+    if (!exists) {
+      await this.fs.mkdir(dirPath);
     }
   }
 
@@ -751,6 +841,27 @@ export default class ReadwisePlugin extends Plugin {
     }
     await this.saveSettings();
     return true;
+  }
+
+  encodeReadwiseBookId(rawBookId?: string): string | undefined {
+    if (rawBookId) {
+      return rawBookId.toString()
+    }
+    return undefined;
+  }
+
+  encodeReaderDocumentId(rawReaderDocumentId?: string) : string | undefined {
+    if (rawReaderDocumentId) {
+      return `readerdocument:${rawReaderDocumentId}`;
+    }
+    return undefined;
+  }
+
+  decodeReaderDocumentId(readerDocumentId?: string) : string | undefined {
+    if (!readerDocumentId || !readerDocumentId.startsWith("readerdocument:")) {
+      return undefined;
+    }
+    return readerDocumentId.replace(/^readerdocument:/, "");
   }
 }
 
