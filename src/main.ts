@@ -372,7 +372,6 @@ export default class ReadwisePlugin extends Plugin {
           }
 
           // write the full document text file
-          let isFullDocumentTextFileCreated = false;
           if (data.full_document_text && data.full_document_text_path) {
             const processedFullDocumentTextFileName = data.full_document_text_path.replace(/^Readwise/, this.settings.readwiseDir);
             console.log("Writing full document text", processedFullDocumentTextFileName);
@@ -383,7 +382,6 @@ export default class ReadwisePlugin extends Plugin {
             if (!await this.fs.exists(processedFullDocumentTextFileName)) {
               // it's a new full document content file, just save it
               await this.fs.write(processedFullDocumentTextFileName, data.full_document_text);
-              isFullDocumentTextFileCreated = true;
             } else {
               // full document content file already exists — overwrite it if it wasn't edited locally
               const existingFullDocument = await this.fs.read(processedFullDocumentTextFileName);
@@ -405,12 +403,7 @@ export default class ReadwisePlugin extends Plugin {
               // if the file already exists we need to append content to existing one
               const existingContent = await this.fs.read(processedFileName);
               const existingContentHash = Md5.hashStr(existingContent).toString();
-              if (isFullDocumentTextFileCreated) {
-                // full document content has just been created but the highlights file exists
-                // this means someone just wanted to resync full document content file alone
-                // leave the existing content — otherwise we'd append all highlights once again!
-                contentToSave = existingContent;
-              } else if (existingContentHash !== data.last_content_hash) {
+              if (existingContentHash !== data.last_content_hash) {
                 // content has been modified (it differs from the previously exported full document)
                 contentToSave = existingContent.trimEnd() + "\n" + data.append_only_content;
               }
