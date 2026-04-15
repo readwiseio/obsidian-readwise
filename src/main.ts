@@ -15,7 +15,7 @@ import { Md5 } from "ts-md5";
 import { StatusBar } from "./status";
 
 // keep pluginVersion in sync with manifest.json
-const pluginVersion = "3.0.1";
+const pluginVersion = "3.0.2";
 
 // switch to local dev server for development
 const baseURL = "https://readwise.io";
