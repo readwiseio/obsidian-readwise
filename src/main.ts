@@ -195,7 +195,7 @@ export default class ReadwisePlugin extends Plugin {
           // make sure all artifacts are processed
           await downloadUnprocessedArtifacts(data.artifactIds);
 
-          await this.acknowledgeSyncCompleted(buttonContext);
+          await this.acknowledgeSyncCompleted(buttonContext, statusID);
           await this.handleSyncSuccess(buttonContext, "Synced!", statusID);
           this.notice("Readwise sync completed", true, 1, true);
           console.log("Readwise Official plugin: completed sync");
@@ -456,11 +456,16 @@ export default class ReadwisePlugin extends Plugin {
     });
   }
 
-  async acknowledgeSyncCompleted(buttonContext: ButtonComponent) {
+  async acknowledgeSyncCompleted(buttonContext: ButtonComponent, statusID?: number) {
     let response;
+    // Pass statusID so the server can scope the mark-delivered exactly to the one we
+    // just downloaded, instead of falling back to "all finished+undelivered for config".
+    const url = statusID
+      ? `${baseURL}/api/obsidian/sync_ack?statusID=${statusID}`
+      : `${baseURL}/api/obsidian/sync_ack`;
     try {
       response = await fetch(
-        `${baseURL}/api/obsidian/sync_ack`,
+        url,
         {
           headers: { ...this.getAuthHeaders(), 'Content-Type': 'application/json' },
           method: "POST",
