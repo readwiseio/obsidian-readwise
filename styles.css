@@ -25,6 +25,14 @@
 .rw-error {
     color: var(--error-color);
 }
+
+.rw-error-action {
+    color: var(--text-accent);
+    font-weight: 600;
+    margin-inline-start: 0.35rem;
+    white-space: nowrap;
+}
+
 .rw-success {
     color: var(--success-color);
 }

@@ -37,6 +37,18 @@ interface ExportStatusResponse {
   artifactIds: number[],
 }
 
+interface ReadwiseAPIErrorResponse {
+  error?: string;
+  message?: string;
+  upgrade_url?: string;
+}
+
+interface ReadwiseSyncError {
+  code?: string;
+  message: string;
+  upgradeUrl?: string;
+}
+
 interface ReadwisePluginSettings {
   token: string;
 
@@ -101,26 +113,72 @@ export default class ReadwisePlugin extends Plugin {
   vault: Vault;
   scheduleInterval: null | number = null;
   statusBar: StatusBar;
+  accountExpiredModal: Modal = null;
 
-  getErrorMessageFromResponse(response: Response) {
-    if (response && response.status === 409) {
-      return "Sync in progress initiated by different client";
+  async getJSONErrorFromResponse(response: Response): Promise<ReadwiseAPIErrorResponse | null> {
+    const contentType = response.headers.get("content-type") || "";
+    if (!contentType.includes("application/json")) {
+      return null;
     }
-    if (response && response.status === 417) {
-      return "Obsidian export is locked. Wait for an hour.";
+
+    try {
+      return await response.json();
+    } catch (e) {
+      console.log("Readwise Official plugin: failed to parse error response: ", e);
+      return null;
     }
-    return `${response ? response.statusText : "Can't connect to server"}`;
   }
 
-  async handleSyncError(buttonContext: ButtonComponent, msg: string) {
+  async getErrorDetailsFromResponse(response: Response): Promise<ReadwiseSyncError> {
+    if (!response) {
+      return { message: "Can't connect to server" };
+    }
+
+    if (response.status === 409) {
+      return { message: "Sync in progress initiated by different client" };
+    }
+    if (response.status === 417) {
+      return { message: "Obsidian export is locked. Wait for an hour." };
+    }
+
+    const errorResponse = await this.getJSONErrorFromResponse(response);
+    if (errorResponse && errorResponse.error === "account_expired" && errorResponse.message) {
+      return {
+        code: errorResponse.error,
+        message: errorResponse.message,
+        upgradeUrl: errorResponse.upgrade_url,
+      };
+    }
+    if (errorResponse && errorResponse.message) {
+      return {
+        code: errorResponse.error,
+        message: errorResponse.message,
+      };
+    }
+
+    return { message: response.statusText || `Request failed with status ${response.status}` };
+  }
+
+  normalizeSyncError(error: string | ReadwiseSyncError): ReadwiseSyncError {
+    if (typeof error === "string") {
+      return { message: error };
+    }
+    return error;
+  }
+
+  async handleSyncError(buttonContext: ButtonComponent, error: string | ReadwiseSyncError) {
+    const syncError = this.normalizeSyncError(error);
     await this.clearSettingsAfterRun();
     this.settings.lastSyncFailed = true;
     await this.saveSettings();
     if (buttonContext) {
-      this.showInfoStatus(buttonContext.buttonEl.parentElement, msg, "rw-error");
+      this.showSyncErrorStatus(buttonContext.buttonEl.parentElement, syncError);
       buttonContext.buttonEl.setText("Run sync");
     } else {
-      this.notice(msg, true, 4, true);
+      this.notice(syncError.message, true, 4, true);
+      if (syncError.upgradeUrl) {
+        this.showAccountExpiredModal(syncError);
+      }
     }
   }
 
@@ -211,7 +269,7 @@ export default class ReadwisePlugin extends Plugin {
         }
       } else {
         console.log("Readwise Official plugin: bad response in getExportStatus: ", response);
-        await this.handleSyncError(buttonContext, this.getErrorMessageFromResponse(response));
+        await this.handleSyncError(buttonContext, await this.getErrorDetailsFromResponse(response));
       }
     } catch (e) {
       console.log("Readwise Official plugin: fetch failed in getExportStatus: ", e);
@@ -276,7 +334,7 @@ export default class ReadwisePlugin extends Plugin {
       }
     } else {
       console.log("Readwise Official plugin: bad response in queueExport: ", response);
-      await this.handleSyncError(buttonContext, this.getErrorMessageFromResponse(response));
+      await this.handleSyncError(buttonContext, await this.getErrorDetailsFromResponse(response));
       return;
     }
   }
@@ -297,13 +355,72 @@ export default class ReadwisePlugin extends Plugin {
 
   showInfoStatus(container: HTMLElement, msg: string, className = "") {
     let info = container.find('.rw-info-container');
+    info.empty();
+    info.removeClass("rw-error");
+    info.removeClass("rw-success");
+    info.removeClass("rw-info");
     info.setText(msg);
-    info.addClass(className);
+    if (className) {
+      info.addClass(className);
+    }
+  }
+
+  showSyncErrorStatus(container: HTMLElement, error: ReadwiseSyncError) {
+    let info = container.find('.rw-info-container');
+    info.empty();
+    info.removeClass("rw-success");
+    info.removeClass("rw-info");
+    info.addClass("rw-error");
+    info.createEl("span", { text: error.message });
+
+    const upgradeUrl = error.upgradeUrl;
+    if (upgradeUrl) {
+      info.appendText(" ");
+      const upgradeLink = info.createEl("a", {
+        text: "Upgrade Readwise",
+        href: upgradeUrl,
+        cls: "rw-error-action",
+      });
+      upgradeLink.onClickEvent((event) => {
+        event.preventDefault();
+        window.open(upgradeUrl);
+      });
+    }
   }
 
   clearInfoStatus(container: HTMLElement) {
     let info = container.find('.rw-info-container');
     info.empty();
+    info.removeClass("rw-error");
+    info.removeClass("rw-success");
+    info.removeClass("rw-info");
+  }
+
+  showAccountExpiredModal(error: ReadwiseSyncError) {
+    const upgradeUrl = error.upgradeUrl;
+    if (!upgradeUrl || this.accountExpiredModal) {
+      return;
+    }
+
+    const modal = new Modal(this.app);
+    this.accountExpiredModal = modal;
+    modal.titleEl.setText("Readwise account expired");
+    modal.contentEl.createEl("p", { text: error.message });
+
+    const buttonsContainer = modal.contentEl.createEl("div", { cls: "rw-modal-btns" });
+    const closeBtn = buttonsContainer.createEl("button", { text: "Close" });
+    const upgradeBtn = buttonsContainer.createEl("button", { text: "Upgrade Readwise", cls: "mod-cta" });
+
+    closeBtn.onClickEvent(() => modal.close());
+    upgradeBtn.onClickEvent(() => {
+      window.open(upgradeUrl);
+      modal.close();
+    });
+
+    modal.onClose = () => {
+      this.accountExpiredModal = null;
+    };
+    modal.open();
   }
 
   getAuthHeaders() {
@@ -330,7 +447,7 @@ export default class ReadwisePlugin extends Plugin {
       blob = await response.blob();
     } else {
       console.log("Readwise Official plugin: bad response in downloadExport: ", response);
-      await this.handleSyncError(buttonContext, this.getErrorMessageFromResponse(response));
+      await this.handleSyncError(buttonContext, await this.getErrorDetailsFromResponse(response));
       throw new Error(`Readwise: error while fetching artifact ${artifactId}`);
     }
 
@@ -477,7 +594,7 @@ export default class ReadwisePlugin extends Plugin {
       return;
     } else {
       console.log("Readwise Official plugin: bad response in acknowledge sync: ", response);
-      await this.handleSyncError(buttonContext, this.getErrorMessageFromResponse(response));
+      await this.handleSyncError(buttonContext, await this.getErrorDetailsFromResponse(response));
       return;
     }
   }
@@ -566,6 +683,11 @@ export default class ReadwisePlugin extends Plugin {
         await this.queueExport();
         return;
       } else {
+        const syncError = await this.getErrorDetailsFromResponse(response);
+        if (syncError.code === "account_expired") {
+          await this.handleSyncError(undefined, syncError);
+          return;
+        }
         console.log(`Readwise Official plugin: saving book id ${bookIds} to refresh later`);
         const deduplicatedBookIds = new Set([...this.settings.booksToRefresh, ...bookIds]);
         this.settings.booksToRefresh = Array.from(deduplicatedBookIds);
