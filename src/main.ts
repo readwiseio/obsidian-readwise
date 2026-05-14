@@ -37,16 +37,6 @@ interface ExportStatusResponse {
   artifactIds: number[],
 }
 
-interface ReadwiseAPIErrorResponse {
-  error?: string;
-  message?: string;
-}
-
-interface ReadwiseSyncError {
-  code?: string;
-  message: string;
-}
-
 interface ReadwisePluginSettings {
   token: string;
 
@@ -113,20 +103,6 @@ export default class ReadwisePlugin extends Plugin {
   scheduleInterval: null | number = null;
   statusBar: StatusBar;
 
-  async getJSONErrorFromResponse(response: Response): Promise<ReadwiseAPIErrorResponse | null> {
-    const contentType = response.headers.get("content-type") || "";
-    if (!contentType.includes("application/json")) {
-      return null;
-    }
-
-    try {
-      return await response.clone().json();
-    } catch (e) {
-      console.log("Readwise Official plugin: failed to parse error response: ", e);
-      return null;
-    }
-  }
-
   async getTextErrorFromResponse(response: Response): Promise<string> {
     try {
       return await response.clone().text();
@@ -136,61 +112,36 @@ export default class ReadwisePlugin extends Plugin {
     }
   }
 
-  async getErrorDetailsFromResponse(response: Response): Promise<ReadwiseSyncError> {
+  async getErrorMessageFromResponse(response: Response): Promise<string> {
     if (!response) {
-      return { message: "Can't connect to server" };
+      return "Can't connect to server";
     }
 
     if (response.status === 409) {
-      return { message: "Sync in progress initiated by different client" };
+      return "Sync in progress initiated by different client";
     }
     if (response.status === 417) {
-      return { message: "Obsidian export is locked. Wait for an hour." };
-    }
-
-    const errorResponse = await this.getJSONErrorFromResponse(response);
-    if (errorResponse && errorResponse.error === "account_expired") {
-      return {
-        code: errorResponse.error,
-        message: ACCOUNT_EXPIRED_MESSAGE,
-      };
-    }
-    if (errorResponse && errorResponse.message) {
-      return {
-        code: errorResponse.error,
-        message: errorResponse.message,
-      };
+      return "Obsidian export is locked. Wait for an hour.";
     }
     if (response.status === 403) {
       const errorText = await this.getTextErrorFromResponse(response);
       if (errorText.includes("Your Readwise account has expired")) {
-        return {
-          code: "account_expired",
-          message: ACCOUNT_EXPIRED_MESSAGE,
-        };
+        return ACCOUNT_EXPIRED_MESSAGE;
       }
     }
 
-    return { message: response.statusText || `Request failed with status ${response.status}` };
+    return response.statusText || `Request failed with status ${response.status}`;
   }
 
-  normalizeSyncError(error: string | ReadwiseSyncError): ReadwiseSyncError {
-    if (typeof error === "string") {
-      return { message: error };
-    }
-    return error;
-  }
-
-  async handleSyncError(buttonContext: ButtonComponent, error: string | ReadwiseSyncError) {
-    const syncError = this.normalizeSyncError(error);
+  async handleSyncError(buttonContext: ButtonComponent, msg: string) {
     await this.clearSettingsAfterRun();
     this.settings.lastSyncFailed = true;
     await this.saveSettings();
     if (buttonContext) {
-      this.showSyncErrorStatus(buttonContext.buttonEl.parentElement, syncError);
+      this.showSyncErrorStatus(buttonContext.buttonEl.parentElement, msg);
       buttonContext.buttonEl.setText("Run sync");
     } else {
-      this.notice(syncError.message, true, 4, true);
+      this.notice(msg, true, 4, true);
     }
   }
 
@@ -281,7 +232,7 @@ export default class ReadwisePlugin extends Plugin {
         }
       } else {
         console.log("Readwise Official plugin: bad response in getExportStatus: ", response);
-        await this.handleSyncError(buttonContext, await this.getErrorDetailsFromResponse(response));
+        await this.handleSyncError(buttonContext, await this.getErrorMessageFromResponse(response));
       }
     } catch (e) {
       console.log("Readwise Official plugin: fetch failed in getExportStatus: ", e);
@@ -346,7 +297,7 @@ export default class ReadwisePlugin extends Plugin {
       }
     } else {
       console.log("Readwise Official plugin: bad response in queueExport: ", response);
-      await this.handleSyncError(buttonContext, await this.getErrorDetailsFromResponse(response));
+      await this.handleSyncError(buttonContext, await this.getErrorMessageFromResponse(response));
       return;
     }
   }
@@ -377,13 +328,13 @@ export default class ReadwisePlugin extends Plugin {
     }
   }
 
-  showSyncErrorStatus(container: HTMLElement, error: ReadwiseSyncError) {
+  showSyncErrorStatus(container: HTMLElement, msg: string) {
     let info = container.find('.rw-info-container');
     info.empty();
     info.removeClass("rw-success");
     info.removeClass("rw-info");
     info.addClass("rw-error");
-    info.createEl("span", { text: error.message });
+    info.createEl("span", { text: msg });
   }
 
   clearInfoStatus(container: HTMLElement) {
@@ -418,7 +369,7 @@ export default class ReadwisePlugin extends Plugin {
       blob = await response.blob();
     } else {
       console.log("Readwise Official plugin: bad response in downloadExport: ", response);
-      await this.handleSyncError(buttonContext, await this.getErrorDetailsFromResponse(response));
+      await this.handleSyncError(buttonContext, await this.getErrorMessageFromResponse(response));
       throw new Error(`Readwise: error while fetching artifact ${artifactId}`);
     }
 
@@ -565,7 +516,7 @@ export default class ReadwisePlugin extends Plugin {
       return;
     } else {
       console.log("Readwise Official plugin: bad response in acknowledge sync: ", response);
-      await this.handleSyncError(buttonContext, await this.getErrorDetailsFromResponse(response));
+      await this.handleSyncError(buttonContext, await this.getErrorMessageFromResponse(response));
       return;
     }
   }
@@ -654,9 +605,9 @@ export default class ReadwisePlugin extends Plugin {
         await this.queueExport();
         return;
       } else {
-        const syncError = await this.getErrorDetailsFromResponse(response);
-        if (syncError.code === "account_expired") {
-          await this.handleSyncError(undefined, syncError);
+        const errorMessage = await this.getErrorMessageFromResponse(response);
+        if (errorMessage === ACCOUNT_EXPIRED_MESSAGE) {
+          await this.handleSyncError(undefined, errorMessage);
           return;
         }
         console.log(`Readwise Official plugin: saving book id ${bookIds} to refresh later`);
