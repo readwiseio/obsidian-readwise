@@ -8,6 +8,7 @@ node_modules
 # build
 main.js
 *.js.map
+.test-build
 
 data.json
 .env
