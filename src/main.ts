@@ -12,10 +12,11 @@ import {
 } from 'obsidian';
 import * as zip from "@zip.js/zip.js";
 import { Md5 } from "ts-md5";
+import { getErrorDetailsFromResponse, ReadwiseSyncError } from "./errors";
 import { StatusBar } from "./status";
 
 // keep pluginVersion in sync with manifest.json
-const pluginVersion = "3.0.2";
+const pluginVersion = "3.0.3";
 
 // switch to local dev server for development
 const baseURL = "https://readwise.io";
@@ -102,22 +103,13 @@ export default class ReadwisePlugin extends Plugin {
   scheduleInterval: null | number = null;
   statusBar: StatusBar;
 
-  getErrorMessageFromResponse(response: Response) {
-    if (response && response.status === 409) {
-      return "Sync in progress initiated by different client";
-    }
-    if (response && response.status === 417) {
-      return "Obsidian export is locked. Wait for an hour.";
-    }
-    return `${response ? response.statusText : "Can't connect to server"}`;
-  }
-
-  async handleSyncError(buttonContext: ButtonComponent, msg: string) {
+  async handleSyncError(buttonContext: ButtonComponent, error: string | ReadwiseSyncError) {
+    const msg = typeof error === "string" ? error : error.message;
     await this.clearSettingsAfterRun();
     this.settings.lastSyncFailed = true;
     await this.saveSettings();
     if (buttonContext) {
-      this.showInfoStatus(buttonContext.buttonEl.parentElement, msg, "rw-error");
+      this.showSyncErrorStatus(buttonContext.buttonEl.parentElement, msg);
       buttonContext.buttonEl.setText("Run sync");
     } else {
       this.notice(msg, true, 4, true);
@@ -211,7 +203,7 @@ export default class ReadwisePlugin extends Plugin {
         }
       } else {
         console.log("Readwise Official plugin: bad response in getExportStatus: ", response);
-        await this.handleSyncError(buttonContext, this.getErrorMessageFromResponse(response));
+        await this.handleSyncError(buttonContext, await getErrorDetailsFromResponse(response));
       }
     } catch (e) {
       console.log("Readwise Official plugin: fetch failed in getExportStatus: ", e);
@@ -276,7 +268,7 @@ export default class ReadwisePlugin extends Plugin {
       }
     } else {
       console.log("Readwise Official plugin: bad response in queueExport: ", response);
-      await this.handleSyncError(buttonContext, this.getErrorMessageFromResponse(response));
+      await this.handleSyncError(buttonContext, await getErrorDetailsFromResponse(response));
       return;
     }
   }
@@ -297,13 +289,31 @@ export default class ReadwisePlugin extends Plugin {
 
   showInfoStatus(container: HTMLElement, msg: string, className = "") {
     let info = container.find('.rw-info-container');
+    info.empty();
+    info.removeClass("rw-error");
+    info.removeClass("rw-success");
+    info.removeClass("rw-info");
     info.setText(msg);
-    info.addClass(className);
+    if (className) {
+      info.addClass(className);
+    }
+  }
+
+  showSyncErrorStatus(container: HTMLElement, msg: string) {
+    let info = container.find('.rw-info-container');
+    info.empty();
+    info.removeClass("rw-success");
+    info.removeClass("rw-info");
+    info.addClass("rw-error");
+    info.createEl("span", { text: msg });
   }
 
   clearInfoStatus(container: HTMLElement) {
     let info = container.find('.rw-info-container');
     info.empty();
+    info.removeClass("rw-error");
+    info.removeClass("rw-success");
+    info.removeClass("rw-info");
   }
 
   getAuthHeaders() {
@@ -330,7 +340,7 @@ export default class ReadwisePlugin extends Plugin {
       blob = await response.blob();
     } else {
       console.log("Readwise Official plugin: bad response in downloadExport: ", response);
-      await this.handleSyncError(buttonContext, this.getErrorMessageFromResponse(response));
+      await this.handleSyncError(buttonContext, await getErrorDetailsFromResponse(response));
       throw new Error(`Readwise: error while fetching artifact ${artifactId}`);
     }
 
@@ -477,7 +487,7 @@ export default class ReadwisePlugin extends Plugin {
       return;
     } else {
       console.log("Readwise Official plugin: bad response in acknowledge sync: ", response);
-      await this.handleSyncError(buttonContext, this.getErrorMessageFromResponse(response));
+      await this.handleSyncError(buttonContext, await getErrorDetailsFromResponse(response));
       return;
     }
   }
@@ -566,6 +576,11 @@ export default class ReadwisePlugin extends Plugin {
         await this.queueExport();
         return;
       } else {
+        const syncError = await getErrorDetailsFromResponse(response);
+        if (syncError.code === "account_expired") {
+          await this.handleSyncError(undefined, syncError);
+          return;
+        }
         console.log(`Readwise Official plugin: saving book id ${bookIds} to refresh later`);
         const deduplicatedBookIds = new Set([...this.settings.booksToRefresh, ...bookIds]);
         this.settings.booksToRefresh = Array.from(deduplicatedBookIds);

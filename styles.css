@@ -25,6 +25,7 @@
 .rw-error {
     color: var(--error-color);
 }
+
 .rw-success {
     color: var(--success-color);
 }
