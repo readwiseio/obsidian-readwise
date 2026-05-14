@@ -26,6 +26,19 @@ Note: This plugin requires a subscription with [Readwise](https://readwise.io) â
 * Initiate the first sync
 * Thereafter, the plugin can be configured to sync automatically or manually
 
+## Development
+
+This project uses Node.js 20 in CI. To run the same checks locally:
+
+```sh
+npm ci
+npm run typecheck
+npm test
+npm run build
+```
+
+Pull requests run these checks automatically through GitHub Actions.
+
 ## Support
 
 * Please see our [Documentation](https://help.readwise.io/article/125-how-does-the-readwise-to-obsidian-export-integration-work) or email us at hello@readwise.io ðŸ™‚
