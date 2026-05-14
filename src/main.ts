@@ -40,13 +40,11 @@ interface ExportStatusResponse {
 interface ReadwiseAPIErrorResponse {
   error?: string;
   message?: string;
-  upgrade_url?: string;
 }
 
 interface ReadwiseSyncError {
   code?: string;
   message: string;
-  upgradeUrl?: string;
 }
 
 interface ReadwisePluginSettings {
@@ -106,6 +104,7 @@ const DEFAULT_SETTINGS: ReadwisePluginSettings = {
  * This is described as "Sync notification" in the Obsidian export settings
  * on the Readwise website. */
 const READWISE_SYNC_FILENAME = "Readwise Syncs" as const;
+const ACCOUNT_EXPIRED_MESSAGE = "Your Readwise trial has expired. Upgrade or renew your account to continue syncing highlights to Obsidian.";
 
 export default class ReadwisePlugin extends Plugin {
   settings: ReadwisePluginSettings;
@@ -113,7 +112,6 @@ export default class ReadwisePlugin extends Plugin {
   vault: Vault;
   scheduleInterval: null | number = null;
   statusBar: StatusBar;
-  accountExpiredModal: Modal = null;
 
   async getJSONErrorFromResponse(response: Response): Promise<ReadwiseAPIErrorResponse | null> {
     const contentType = response.headers.get("content-type") || "";
@@ -122,10 +120,19 @@ export default class ReadwisePlugin extends Plugin {
     }
 
     try {
-      return await response.json();
+      return await response.clone().json();
     } catch (e) {
       console.log("Readwise Official plugin: failed to parse error response: ", e);
       return null;
+    }
+  }
+
+  async getTextErrorFromResponse(response: Response): Promise<string> {
+    try {
+      return await response.clone().text();
+    } catch (e) {
+      console.log("Readwise Official plugin: failed to parse text error response: ", e);
+      return "";
     }
   }
 
@@ -142,11 +149,10 @@ export default class ReadwisePlugin extends Plugin {
     }
 
     const errorResponse = await this.getJSONErrorFromResponse(response);
-    if (errorResponse && errorResponse.error === "account_expired" && errorResponse.message) {
+    if (errorResponse && errorResponse.error === "account_expired") {
       return {
         code: errorResponse.error,
-        message: errorResponse.message,
-        upgradeUrl: errorResponse.upgrade_url,
+        message: ACCOUNT_EXPIRED_MESSAGE,
       };
     }
     if (errorResponse && errorResponse.message) {
@@ -154,6 +160,15 @@ export default class ReadwisePlugin extends Plugin {
         code: errorResponse.error,
         message: errorResponse.message,
       };
+    }
+    if (response.status === 403) {
+      const errorText = await this.getTextErrorFromResponse(response);
+      if (errorText.includes("Your Readwise account has expired")) {
+        return {
+          code: "account_expired",
+          message: ACCOUNT_EXPIRED_MESSAGE,
+        };
+      }
     }
 
     return { message: response.statusText || `Request failed with status ${response.status}` };
@@ -176,9 +191,6 @@ export default class ReadwisePlugin extends Plugin {
       buttonContext.buttonEl.setText("Run sync");
     } else {
       this.notice(syncError.message, true, 4, true);
-      if (syncError.upgradeUrl) {
-        this.showAccountExpiredModal(syncError);
-      }
     }
   }
 
@@ -372,20 +384,6 @@ export default class ReadwisePlugin extends Plugin {
     info.removeClass("rw-info");
     info.addClass("rw-error");
     info.createEl("span", { text: error.message });
-
-    const upgradeUrl = error.upgradeUrl;
-    if (upgradeUrl) {
-      info.appendText(" ");
-      const upgradeLink = info.createEl("a", {
-        text: "Upgrade Readwise",
-        href: upgradeUrl,
-        cls: "rw-error-action",
-      });
-      upgradeLink.onClickEvent((event) => {
-        event.preventDefault();
-        window.open(upgradeUrl);
-      });
-    }
   }
 
   clearInfoStatus(container: HTMLElement) {
@@ -394,33 +392,6 @@ export default class ReadwisePlugin extends Plugin {
     info.removeClass("rw-error");
     info.removeClass("rw-success");
     info.removeClass("rw-info");
-  }
-
-  showAccountExpiredModal(error: ReadwiseSyncError) {
-    const upgradeUrl = error.upgradeUrl;
-    if (!upgradeUrl || this.accountExpiredModal) {
-      return;
-    }
-
-    const modal = new Modal(this.app);
-    this.accountExpiredModal = modal;
-    modal.titleEl.setText("Readwise account expired");
-    modal.contentEl.createEl("p", { text: error.message });
-
-    const buttonsContainer = modal.contentEl.createEl("div", { cls: "rw-modal-btns" });
-    const closeBtn = buttonsContainer.createEl("button", { text: "Close" });
-    const upgradeBtn = buttonsContainer.createEl("button", { text: "Upgrade Readwise", cls: "mod-cta" });
-
-    closeBtn.onClickEvent(() => modal.close());
-    upgradeBtn.onClickEvent(() => {
-      window.open(upgradeUrl);
-      modal.close();
-    });
-
-    modal.onClose = () => {
-      this.accountExpiredModal = null;
-    };
-    modal.open();
   }
 
   getAuthHeaders() {
