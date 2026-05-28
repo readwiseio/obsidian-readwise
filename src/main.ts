@@ -13,6 +13,7 @@ import {
 import * as zip from "@zip.js/zip.js";
 import { Md5 } from "ts-md5";
 import { getErrorDetailsFromResponse, ReadwiseSyncError } from "./errors";
+import { readwiseSyncFilePath } from "./paths";
 import { StatusBar } from "./status";
 
 // keep pluginVersion in sync with manifest.json
@@ -90,11 +91,6 @@ const DEFAULT_SETTINGS: ReadwisePluginSettings = {
   "booksIDsMap": {},
   "reimportShowConfirmation": true
 };
-
-/** The name of the Readwise Sync history file, without the extension.
- * This is described as "Sync notification" in the Obsidian export settings
- * on the Readwise website. */
-const READWISE_SYNC_FILENAME = "Readwise Syncs" as const;
 
 export default class ReadwisePlugin extends Plugin {
   settings: ReadwisePluginSettings;
@@ -362,7 +358,7 @@ export default class ReadwisePlugin extends Plugin {
             .replace(/^Readwise/, this.settings.readwiseDir)
             .replace(/\.json$/, ".md")
         );
-        const isReadwiseSyncFile = processedFileName === `${this.settings.readwiseDir}/${READWISE_SYNC_FILENAME}.md`;
+        const isReadwiseSyncFile = processedFileName === readwiseSyncFilePath(this.settings.readwiseDir, normalizePath);
 
         try {
           const fileContent = await entry.getData(new zip.TextWriter());
