@@ -72,6 +72,9 @@ interface ReadwisePluginSettings {
 
   /** User choice for confirming delete and reimport */
   reimportShowConfirmation: boolean;
+
+  /** Merge full document content into highlights file */
+  mergeFullDocument: boolean;
 }
 
 // define our initial settings
@@ -89,7 +92,8 @@ const DEFAULT_SETTINGS: ReadwisePluginSettings = {
   "booksToRefresh": [],
   "failedBooks": [],
   "booksIDsMap": {},
-  "reimportShowConfirmation": true
+  "reimportShowConfirmation": true,
+  "mergeFullDocument": false
 };
 
 export default class ReadwisePlugin extends Plugin {
@@ -377,29 +381,39 @@ export default class ReadwisePlugin extends Plugin {
             console.error(`Error while processing entry: ${entry.filename}`);
           }
 
-          // write the full document text file
+          // write the full document text file (unless merging into highlights)
           if (data.full_document_text && data.full_document_text_path) {
-            const processedFullDocumentTextFileName = data.full_document_text_path.replace(/^Readwise/, this.settings.readwiseDir);
-            console.log("Writing full document text", processedFullDocumentTextFileName);
-            // track the book
-            this.settings.booksIDsMap[processedFullDocumentTextFileName] = bookID;
-            // ensure the directory exists
-            await this.createDirForFile(processedFullDocumentTextFileName);
-            if (!await this.fs.exists(processedFullDocumentTextFileName)) {
-              // it's a new full document content file, just save it
-              await this.fs.write(processedFullDocumentTextFileName, data.full_document_text);
-            } else {
-              // full document content file already exists — overwrite it if it wasn't edited locally
-              const existingFullDocument = await this.fs.read(processedFullDocumentTextFileName);
-              const existingFullDocumentHash = Md5.hashStr(existingFullDocument).toString();
-              if (existingFullDocumentHash === data.last_full_document_hash) {
+            if (!this.settings.mergeFullDocument) {
+              // Original behavior: write separate full document file
+              const processedFullDocumentTextFileName = data.full_document_text_path.replace(/^Readwise/, this.settings.readwiseDir);
+              console.log("Writing full document text", processedFullDocumentTextFileName);
+              // track the book
+              this.settings.booksIDsMap[processedFullDocumentTextFileName] = bookID;
+              // ensure the directory exists
+              await this.createDirForFile(processedFullDocumentTextFileName);
+              if (!await this.fs.exists(processedFullDocumentTextFileName)) {
+                // it's a new full document content file, just save it
                 await this.fs.write(processedFullDocumentTextFileName, data.full_document_text);
+              } else {
+                // full document content file already exists — overwrite it if it wasn't edited locally
+                const existingFullDocument = await this.fs.read(processedFullDocumentTextFileName);
+                const existingFullDocumentHash = Md5.hashStr(existingFullDocument).toString();
+                if (existingFullDocumentHash === data.last_full_document_hash) {
+                  await this.fs.write(processedFullDocumentTextFileName, data.full_document_text);
+                }
               }
             }
+            // If mergeFullDocument is true, the content will be appended to highlights below
           }
 
           // write the actual files
           let contentToSave = data.full_content ?? data.append_only_content;
+
+          // Optionally merge full document content into highlights file
+          if (this.settings.mergeFullDocument && data.full_document_text && contentToSave) {
+            contentToSave += "\n\n---\n\n## Full Document\n\n" + data.full_document_text;
+          }
+
           if (contentToSave) {
             // track the book
             this.settings.booksIDsMap[processedFileName] = bookID;
@@ -981,6 +995,17 @@ class ReadwiseSettingTab extends PluginSettingTab {
             if (val) {
               await this.plugin.syncBookHighlights();
             }
+          });
+        }
+        );
+      new Setting(containerEl)
+        .setName("Merge full document into highlights")
+        .setDesc("If enabled, the full document text will be appended to the highlights file instead of creating a separate file")
+        .addToggle((toggle) => {
+          toggle.setValue(this.plugin.settings.mergeFullDocument);
+          toggle.onChange(async (val) => {
+            this.plugin.settings.mergeFullDocument = val;
+            await this.plugin.saveSettings();
           });
         }
         );
