@@ -13,7 +13,7 @@ import {
 import * as zip from "@zip.js/zip.js";
 import { Md5 } from "ts-md5";
 import { getErrorDetailsFromResponse, ReadwiseSyncError } from "./errors";
-import { readwiseSyncFilePath } from "./paths";
+import { readwiseSyncFilePath, stablePathForBookExport } from "./paths";
 import { StatusBar } from "./status";
 
 // keep pluginVersion in sync with manifest.json
@@ -401,20 +401,21 @@ export default class ReadwisePlugin extends Plugin {
           // write the actual files
           let contentToSave = data.full_content ?? data.append_only_content;
           if (contentToSave) {
+            const pathToSave = stablePathForBookExport(this.settings.booksIDsMap, bookID, processedFileName);
             // track the book
-            this.settings.booksIDsMap[processedFileName] = bookID;
+            this.settings.booksIDsMap[pathToSave] = bookID;
             // ensure the directory exists
-            await this.createDirForFile(processedFileName);
-            if (await this.fs.exists(processedFileName)) {
+            await this.createDirForFile(pathToSave);
+            if (await this.fs.exists(pathToSave)) {
               // if the file already exists we need to append content to existing one
-              const existingContent = await this.fs.read(processedFileName);
+              const existingContent = await this.fs.read(pathToSave);
               const existingContentHash = Md5.hashStr(existingContent).toString();
               if (existingContentHash !== data.last_content_hash) {
                 // content has been modified (it differs from the previously exported full document)
                 contentToSave = existingContent.trimEnd() + "\n" + data.append_only_content;
               }
             }
-            await this.fs.write(processedFileName, contentToSave);
+            await this.fs.write(pathToSave, contentToSave);
           }
 
           // save the entry in settings to ensure that it can be
