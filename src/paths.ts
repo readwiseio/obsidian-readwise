@@ -20,3 +20,58 @@ export function readwiseSyncFilePath(
 ): string {
   return normalizePath(`${readwiseDir}/${READWISE_SYNC_FILENAME}.md`);
 }
+
+export type BooksIDsMap = { [filePath: string]: string };
+
+function isFullDocumentContentPath(path: string): boolean {
+  return path.split("/").includes("Full Document Contents");
+}
+
+function hasNumericSuffixBeforeExtension(path: string): boolean {
+  return /\s\(\d+\)\.md$/i.test(path);
+}
+
+function compareCandidatePaths(left: string, right: string): number {
+  const leftHasNumericSuffix = hasNumericSuffixBeforeExtension(left);
+  const rightHasNumericSuffix = hasNumericSuffixBeforeExtension(right);
+
+  if (leftHasNumericSuffix !== rightHasNumericSuffix) {
+    return leftHasNumericSuffix ? 1 : -1;
+  }
+
+  if (left.length !== right.length) {
+    return left.length - right.length;
+  }
+
+  return left.localeCompare(right);
+}
+
+/**
+ * Resolve the vault path to update for an exported Readwise book.
+ *
+ * Readwise export artifacts can occasionally contain a new filename for a book
+ * that already exists in the vault, such as `Book Title (467).md`. When the
+ * settings map already knows a path for the same book ID, keep updating that
+ * stable path instead of creating a duplicate suffixed file.
+ */
+export function stablePathForBookExport(
+  booksIDsMap: BooksIDsMap,
+  bookID: string,
+  exportedPath: string,
+): string {
+  if (!bookID || booksIDsMap[exportedPath] === bookID) {
+    return exportedPath;
+  }
+
+  const exportedIsFullDocumentContent = isFullDocumentContentPath(exportedPath);
+  const candidates = Object.keys(booksIDsMap).filter((path) => {
+    return booksIDsMap[path] === bookID
+      && isFullDocumentContentPath(path) === exportedIsFullDocumentContent;
+  });
+
+  if (!candidates.length) {
+    return exportedPath;
+  }
+
+  return candidates.sort(compareCandidatePaths)[0];
+}
