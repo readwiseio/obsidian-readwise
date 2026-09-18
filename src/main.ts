@@ -276,10 +276,6 @@ export default class ReadwisePlugin extends Plugin {
     // @ts-ignore
     if (!this.app.isMobile) {
       this.statusBar.displayMessage(msg.toLowerCase(), timeout, forcing);
-    } else {
-      if (!show) {
-        new Notice(msg);
-      }
     }
   }
 
