@@ -12,9 +12,18 @@ import {
 } from 'obsidian';
 import * as zip from "@zip.js/zip.js";
 import { Md5 } from "ts-md5";
-import { getErrorDetailsFromResponse, ReadwiseSyncError } from "./errors";
+import { getErrorDetailsFromResponse, isInvalidTokenError, ReadwiseSyncError } from "./errors";
 import { readwiseSyncFilePath } from "./paths";
 import { StatusBar } from "./status";
+import {
+  clearToken as clearStoredToken,
+  getToken as getStoredToken,
+  hasSecretStorage,
+  isFreshInstall,
+  isStranded,
+  migrateTokenToKeychain as migrateStoredTokenToKeychain,
+  setToken as setStoredToken,
+} from "./secretStorage";
 
 // keep pluginVersion in sync with manifest.json
 const pluginVersion = "3.0.3";
@@ -40,7 +49,14 @@ interface ExportStatusResponse {
 }
 
 interface ReadwisePluginSettings {
+  /** Plaintext fallback token, used when keychainOnly is false or when
+   * Obsidian Keychain (SecretStorage) isn't available on this device. */
   token: string;
+
+  /** Whether the Readwise token is stored in Obsidian Keychain rather than
+   * plaintext here. Set automatically on fresh installs when Keychain is
+   * available, or by the user via "Move to Obsidian Keychain". */
+  keychainOnly: boolean;
 
   /** Folder to save highlights */
   readwiseDir: string;
@@ -78,6 +94,7 @@ interface ReadwisePluginSettings {
 // quoted keys for easy copying to data.json during development
 const DEFAULT_SETTINGS: ReadwisePluginSettings = {
   "token": "",
+  "keychainOnly": false, // set to true on fresh installs when Keychain is available, or by the user via "Move to Obsidian Keychain (OS Keychain)"
   "readwiseDir": "Readwise",
   "frequency": "0",
   "triggerOnLoad": true,
@@ -98,12 +115,21 @@ export default class ReadwisePlugin extends Plugin {
   vault: Vault;
   scheduleInterval: null | number = null;
   statusBar: StatusBar;
+  settingTab: ReadwiseSettingTab;
 
   async handleSyncError(buttonContext: ButtonComponent, error: string | ReadwiseSyncError) {
     const msg = typeof error === "string" ? error : error.message;
     await this.clearSettingsAfterRun();
     this.settings.lastSyncFailed = true;
     await this.saveSettings();
+    if (isInvalidTokenError(error)) {
+      // Clear the rejected token and rebuild the settings tab so it shows 
+      // "Connect" instead of a sync button that will keep failing.
+      await this.clearToken();
+      this.notice(msg, true, 4, true);
+      this.settingTab?.display();
+      return;
+    }
     if (buttonContext) {
       this.showSyncErrorStatus(buttonContext.buttonEl.parentElement, msg);
       buttonContext.buttonEl.setText("Run sync");
@@ -310,7 +336,7 @@ export default class ReadwisePlugin extends Plugin {
 
   getAuthHeaders() {
     return {
-      'AUTHORIZATION': `Token ${this.settings.token}`,
+      'AUTHORIZATION': `Token ${this.getToken()}`,
       'Obsidian-Client': `${this.getObsidianClientID()}`,
       'Readwise-Client-Version': pluginVersion,
     };
@@ -507,7 +533,7 @@ export default class ReadwisePlugin extends Plugin {
     /** if true, was not initiated by user */
     auto?: boolean,
   ) {
-    if (!this.settings.token) return;
+    if (!this.getToken()) return;
 
     let targetBookIds = [
       // try to sync provided bookIds
@@ -569,7 +595,7 @@ export default class ReadwisePlugin extends Plugin {
         return;
       } else {
         const syncError = await getErrorDetailsFromResponse(response);
-        if (syncError.code === "account_expired") {
+        if (syncError.code === "account_expired" || isInvalidTokenError(syncError)) {
           await this.handleSyncError(undefined, syncError);
           return;
         }
@@ -745,7 +771,8 @@ export default class ReadwisePlugin extends Plugin {
       });
     });
 
-    this.addSettingTab(new ReadwiseSettingTab(this.app, this));
+    this.settingTab = new ReadwiseSettingTab(this.app, this);
+    this.addSettingTab(this.settingTab);
 
     // ensure workspace is settled; this ensures cache is loaded
     this.app.workspace.onLayoutReady(async () => {
@@ -791,11 +818,49 @@ export default class ReadwisePlugin extends Plugin {
   }
 
   async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    const rawData = await this.loadData();
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, rawData ?? {});
+    if (isFreshInstall(rawData) && hasSecretStorage(this.app)) {
+      // Brand-new install with Keychain support: skip plaintext storage
+      // entirely rather than writing a token to data.json and migrating
+      // it later.
+      this.settings.keychainOnly = true;
+    }
   }
 
   async saveSettings() {
     await this.saveData(this.settings);
+  }
+
+  getToken(): string {
+    return getStoredToken(this.app, this.settings);
+  }
+
+  async setToken(value: string): Promise<void> {
+    setStoredToken(this.app, this.settings, value);
+    await this.saveSettings();
+  }
+
+  async clearToken(): Promise<void> {
+    clearStoredToken(this.app, this.settings);
+    await this.saveSettings();
+  }
+
+  /** Moves an existing plaintext token into Obsidian Keychain. Returns
+   * false without changing anything if Keychain isn't available here. */
+  async migrateTokenToKeychain(): Promise<boolean> {
+    const migrated = migrateStoredTokenToKeychain(this.app, this.settings);
+    if (migrated) {
+      await this.saveSettings();
+    }
+    return migrated;
+  }
+
+  /** True when this vault is keychain-only but Keychain is unavailable on
+   * this device/Obsidian build, so the token is unreachable here even
+   * though the vault is still "connected". */
+  isTokenStranded(): boolean {
+    return isStranded(this.app, this.settings);
   }
 
   getObsidianClientID() {
@@ -833,8 +898,7 @@ export default class ReadwisePlugin extends Plugin {
     }
     if (data.userAccessToken) {
       console.log("Readwise Official plugin: successfully authenticated with Readwise");
-      this.settings.token = data.userAccessToken;
-      await this.saveSettings();
+      await this.setToken(data.userAccessToken);
     } else {
       if (attempt > 20) {
         console.log('Readwise Official plugin: reached attempt limit in getUserAuthToken');
@@ -888,7 +952,12 @@ class ReadwiseSettingTab extends PluginSettingTab {
     containerEl.getElementsByTagName('p')[0].appendText(' 📚');
     containerEl.createEl('h2', { text: 'Settings' });
 
-    if (this.plugin.settings.token) {
+    if (this.plugin.isTokenStranded()) {
+      new Setting(containerEl)
+        .setName("Readwise connection unavailable on this device")
+        .setClass("rw-setting-stranded")
+        .setDesc("This vault's Readwise connection is stored in Obsidian Keychain, which isn't available in this version of Obsidian. Update Obsidian on this device to reconnect.");
+    } else if (this.plugin.getToken()) {
       new Setting(containerEl)
         .setName("Sync your Readwise data with Obsidian")
         .setDesc("On first sync, the Readwise plugin will create a new folder containing all your highlights")
@@ -984,6 +1053,45 @@ class ReadwiseSettingTab extends PluginSettingTab {
       if (this.plugin.settings.lastSyncFailed) {
         this.plugin.showInfoStatus(containerEl.find(".rw-setting-sync .rw-info-container").parentElement, "Last sync failed", "rw-error");
       }
+
+      if (hasSecretStorage(this.app) && !this.plugin.settings.keychainOnly) {
+        new Setting(containerEl)
+          .setName("Move your token to Obsidian Keychain")
+          .setDesc("Stores your Readwise token in this device's Obsidian Keychain instead of in plaintext in data.json. Keychain entries don't sync between devices, so other devices sharing this vault will need to reconnect separately.")
+          .addButton((button) => {
+            button.setButtonText("Move to Keychain").onClick(() => {
+              this.confirmAction(
+                "Move token to Obsidian Keychain?",
+                "Your Readwise token will be stored in this device's Obsidian Keychain and removed from data.json. If you sync this vault to other devices, they will need to reconnect to Readwise separately.",
+                "Move token",
+                async () => {
+                  const migrated = await this.plugin.migrateTokenToKeychain();
+                  if (migrated) {
+                    this.plugin.notice("Token moved to Obsidian Keychain", true);
+                    this.display();
+                  }
+                }
+              );
+            });
+          });
+      }
+
+      new Setting(containerEl)
+        .setName("Disconnect Readwise")
+        .setDesc("Removes your stored Readwise token. You'll need to reconnect to resume syncing.")
+        .addButton((button) => {
+          button.setButtonText("Disconnect").setWarning().onClick(() => {
+            this.confirmAction(
+              "Disconnect from Readwise?",
+              "This removes your stored Readwise token. You'll need to reconnect to resume syncing.",
+              "Disconnect",
+              async () => {
+                await this.plugin.clearToken();
+                this.display();
+              }
+            );
+          });
+        });
     } else {
       new Setting(containerEl)
         .setName("Connect Obsidian to Readwise")
@@ -1005,5 +1113,22 @@ class ReadwiseSettingTab extends PluginSettingTab {
     }
     const help = containerEl.createEl('p',);
     help.innerHTML = "Question? Please see our <a href='https://help.readwise.io/article/125-how-does-the-readwise-to-obsidian-export-integration-work'>Documentation</a> or email us at <a href='mailto:hello@readwise.io'>hello@readwise.io</a> 🙂";
+  }
+
+  /** Shows a confirm/cancel modal, matching the style of the reimport
+   * confirmation in main.ts, and runs `onConfirm` if the user confirms. */
+  private confirmAction(title: string, message: string, confirmText: string, onConfirm: () => void): void {
+    const modal = new Modal(this.app);
+    modal.titleEl.setText(title);
+    modal.contentEl.createEl('p', { text: message, cls: 'rw-modal-warning-text' });
+    const buttonsContainer = modal.contentEl.createEl('div', { cls: 'rw-modal-btns' });
+    const cancelBtn = buttonsContainer.createEl('button', { text: 'Cancel' });
+    const confirmBtn = buttonsContainer.createEl('button', { text: confirmText, cls: 'mod-warning' });
+    cancelBtn.onClickEvent(() => modal.close());
+    confirmBtn.onClickEvent(() => {
+      modal.close();
+      onConfirm();
+    });
+    modal.open();
   }
 }
